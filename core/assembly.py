@@ -28,6 +28,21 @@ from core.assembly_prompts import (
 )
 from core.exceptions import PDFError, ImageError
 from core.drawing_cache import get_cached_result, save_cached_result
+from core.pn_utils import (
+    reconcile_part_number, cross_reference_part_numbers,
+    extract_pn_from_filename, combined_pn_distance,
+    reconcile_drawing_number, reconcile_revision,
+)
+from core.text_utils import (
+    clean_bom_items_in_place, normalize_known_phrases_in_place,
+)
+from core.validators import (
+    validate_standards,
+    validate_surface_prep_and_post_process,
+    validate_ral_codes,
+    validate_all_paint_brands,
+    validate_coating_classification,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +124,121 @@ def _filter_overview_assemblies(analysis: dict, results: list[dict]) -> int:
         kept.append(a)
     analysis["assemblies"] = kept
     return removed
+
+
+_MARKING_PN_PATTERNS = [
+    re.compile(r"MARK\s+(?:PART\s+NUMBER|P/N|PN|PART\s*NO\.?)\s*[:\-]?\s*([A-Z0-9]+[A-Z0-9\-/\.]{3,})", re.IGNORECASE),
+    re.compile(r"MARKING\s+(?:PART\s+NUMBER|P/N|PN)\s*[:\-]?\s*([A-Z0-9]+[A-Z0-9\-/\.]{3,})", re.IGNORECASE),
+]
+
+
+def _scan_marking_pn_mismatch(results: list[dict], analysis: dict) -> list[str]:
+    """
+    סורק בכל שרטוט אחרי שלבי סימון שמכילים 'MARK PART NUMBER X'.
+    אם ה-P/N X לא תואם ל-P/N של השרטוט עצמו ולא ל-P/N של ההורה ברמת המכלול —
+    מוציא אזהרה ב-INFO (כי ייתכן שזה מכוון).
+    """
+    if not results:
+        return []
+
+    # מיפוי שרטוט-לשרטוט-הורה על סמך הניתוח
+    parent_by_child: dict[str, str] = {}
+    for a in (analysis.get("assemblies") or []):
+        if not isinstance(a, dict):
+            continue
+        ppn = (a.get("parent_part_number") or "").strip().upper()
+        for c in a.get("children") or []:
+            if isinstance(c, dict):
+                cpn = (c.get("part_number") or "").strip().upper()
+                if cpn and ppn:
+                    parent_by_child[cpn] = ppn
+
+    warnings: list[str] = []
+    for d in results or []:
+        if not isinstance(d, dict):
+            continue
+        own_pn = (d.get("part_number") or "").strip().upper()
+        if not own_pn:
+            continue
+        parent_pn = parent_by_child.get(own_pn, "")
+
+        # חיפוש phrase של "MARK PART NUMBER X" בתוך כל שלב מסוג סימון/הערות
+        texts_to_scan: list[tuple[str, str]] = []
+        for fld in ("machining_processes", "additional_processes",
+                    "inspection_processes", "final_approval"):
+            for step in d.get(fld) or []:
+                if not isinstance(step, dict):
+                    continue
+                step_no = str(step.get("step_no") or "").strip()
+                combined = " ".join(
+                    str(step.get(k) or "")
+                    for k in ("name_en", "name_he", "details")
+                )
+                if combined.strip():
+                    texts_to_scan.append((step_no, combined))
+        # גם בהערות הכלליות
+        notes = str(d.get("notes") or "").strip()
+        if notes:
+            texts_to_scan.append(("notes", notes))
+
+        for step_no, text in texts_to_scan:
+            for pat in _MARKING_PN_PATTERNS:
+                for match in pat.finditer(text):
+                    marked_pn = match.group(1).strip().upper().rstrip(".,;:")
+                    if len(marked_pn) < 5:
+                        continue
+                    if marked_pn == own_pn:
+                        continue
+                    if parent_pn and marked_pn == parent_pn:
+                        continue
+                    msg = (
+                        f"[INFO][MARKING_PN_CROSS_REF] {d.get('part_number', '?')} "
+                        f"שלב {step_no} מזכיר סימון P/N '{match.group(1)}' "
+                        f"— שונה מ-P/N של השרטוט"
+                        + (f" ומההורה '{parent_pn}'" if parent_pn else "")
+                        + " — ודאי שזה מכוון."
+                    )
+                    warnings.append(msg)
+                    logger.info("[Assembly] ℹ️ %s", msg)
+    return warnings
+
+
+def _demote_nested_roots(analysis: dict) -> int:
+    """
+    אם המודל החזיר מספר 'roots' (assemblies) — בודק אם אחד מהם מופיע כילד
+    בתוך 'children' של אחר. במקרה כזה, מוריד את המקונן מהרמה העליונה
+    (הוא אינו באמת root אלא sub-assembly).
+    מחזיר את מספר ה-roots שהורדו מהרמה.
+    """
+    asms = [a for a in (analysis.get("assemblies") or []) if isinstance(a, dict)]
+    if len(asms) <= 1:
+        return 0
+
+    # אוסף את כל ה-PNs שמופיעים כילדים בכל ה-roots.
+    children_pns: set[str] = set()
+    for a in asms:
+        for c in a.get("children") or []:
+            if isinstance(c, dict):
+                cpn = (c.get("part_number") or "").strip().upper()
+                if cpn:
+                    children_pns.add(cpn)
+
+    kept: list[dict] = []
+    demoted = 0
+    for a in asms:
+        parent_pn = (a.get("parent_part_number") or "").strip().upper()
+        if parent_pn and parent_pn in children_pns:
+            demoted += 1
+            logger.info(
+                "🔧 הורדת root מקונן: %s מופיע כ-child של assembly אחר",
+                parent_pn,
+            )
+            continue
+        kept.append(a)
+
+    if demoted:
+        analysis["assemblies"] = kept
+    return demoted
 
 
 def _validate_product_tree(analysis: dict, results: list[dict]) -> list[str]:
@@ -336,6 +466,257 @@ def _looks_like_material(text: str) -> bool:
 
 
 # ───────────────────────────────────────────────────────────────
+# Post-extraction validators (hallucination / self-ref BOM / DWG prefix)
+# ───────────────────────────────────────────────────────────────
+# לקוחות ידועים → קידומות P/N ו-DRAWING שחובה שיופיעו בתחילת המחרוזת
+_CUSTOMER_PREFIXES: dict[str, tuple[str, ...]] = {
+    "BIRD AEROSYSTEMS": ("BAS",),
+    "BIRD": ("BAS",),
+    "RAFAEL": ("BP", "BB", "BN", "BO", "BG", "RF", "PWRL", "BBLE", "HLTA",
+               "FTLS", "FTL", "MMA", "M1R", "8H-", "22H-", "R0", "R1"),
+}
+
+
+def _normalize_for_grep(text: str) -> str:
+    """הסרת רווחים/מקפים/נקודות לצורך השוואת substring גמישה."""
+    return re.sub(r"[\s\-\._/]+", "", (text or "").upper())
+
+
+def _validate_standards_against_ocr(
+    standards: list, ocr_text: str
+) -> tuple[list[str], list[str]]:
+    """
+    מחזיר (standards_retained, flagged_hallucinations).
+    תקן מאומת אם הוא מופיע (נורמליזציה של רווחים/מקפים) בטקסט ה-OCR.
+    אם OCR ריק — לא נוכל לאמת, מחזירים הכל כמות שהוא.
+    """
+    if not standards:
+        return [], []
+    ocr_norm = _normalize_for_grep(ocr_text)
+    if not ocr_norm:
+        return list(standards), []
+    kept: list[str] = []
+    flagged: list[str] = []
+    for std in standards:
+        std_text = str(std or "").strip()
+        if not std_text:
+            continue
+        std_norm = _normalize_for_grep(std_text)
+        if std_norm and std_norm in ocr_norm:
+            kept.append(std_text)
+        else:
+            # גם בדיקה על prefix קצר (לפחות 6 תווים משמעותיים) למקרה של
+            # Class/Type סופי שנמחק
+            core = re.split(r"\s+(?:TYPE|CLASS|GRADE|METHOD)\b", std_text,
+                            maxsplit=1, flags=re.IGNORECASE)[0]
+            core_norm = _normalize_for_grep(core)
+            if len(core_norm) >= 6 and core_norm in ocr_norm:
+                kept.append(std_text)
+            else:
+                flagged.append(std_text)
+    return kept, flagged
+
+
+_FORMERLY_RE = re.compile(
+    r"\(\s*FORM(?:ERLY|ALY)[:\s]+(.+?)\)", re.IGNORECASE | re.DOTALL
+)
+
+
+def _split_material_formerly(stage1: dict) -> bool:
+    """
+    אם `material` מכיל ביטוי '(FORMERLY ...)' — מעביר את התוכן ל-material_formerly
+    ומנקה אותו מה-material. מחזיר True אם בוצע תיקון.
+
+    דוגמה (מ-Elbit 8554-3672-00):
+      material = "AL 5052-H32 PER SAE-AMS-4016 (FORMERLY AMS QQ-A-250/8 OR AMS QQ-A-225/7)"
+      → material = "AL 5052-H32 PER SAE-AMS-4016"
+      → material_formerly = "AMS QQ-A-250/8 OR AMS QQ-A-225/7"
+    """
+    if not isinstance(stage1, dict):
+        return False
+    mat = (stage1.get("material") or "").strip()
+    if not mat:
+        return False
+    # אם כבר יש material_formerly מפורש מהמודל — אל תדרוס
+    existing_formerly = (stage1.get("material_formerly") or "").strip()
+    if existing_formerly:
+        return False
+    m = _FORMERLY_RE.search(mat)
+    if not m:
+        return False
+    formerly_content = m.group(1).strip().rstrip(".,; ")
+    primary = _FORMERLY_RE.sub("", mat).strip()
+    # נקי רווחים מרובים וסימני פיסוק תלויים
+    primary = re.sub(r"\s{2,}", " ", primary).strip().rstrip(".,;")
+    stage1["material"] = primary
+    stage1["material_formerly"] = formerly_content
+    return True
+
+
+def _infer_drawing_number_from_pn(stage1: dict) -> bool:
+    """
+    אם drawing_number ריק/פסול אבל יש part_number — הנח ש-drawing_number = P/N.
+    זו מוסכמה נפוצה בלקוחות קטנים (למשל Mechanico-Shaftech, Elbit) שאין להם
+    שדה DWG נפרד. מחזיר True אם בוצע תיקון.
+    """
+    if not isinstance(stage1, dict):
+        return False
+    dwg = (stage1.get("drawing_number") or "").strip()
+    pn = (stage1.get("part_number") or "").strip()
+    if not pn:
+        return False
+    if dwg and dwg not in ("-", "—", "N/A", "n/a", "NA"):
+        return False
+    stage1["drawing_number"] = pn
+    return True
+
+
+def _default_role_if_missing(stage1: dict) -> bool:
+    """
+    אם assembly_role ריק — הסק אוטומטית:
+    - אין BOM → PART
+    - BOM קיים עם פריטים ≥ 1 שונים מה-P/N העצמי → ASSEMBLY
+    - הכל self-reference → PART (נידון ב-_detect_self_reference_bom)
+    מחזיר True אם עדכן.
+    """
+    if not isinstance(stage1, dict):
+        return False
+    role = (stage1.get("assembly_role") or "").strip()
+    if role:
+        return False
+    bom = stage1.get("bom_items") or []
+    pn = (stage1.get("part_number") or "").strip().upper()
+    other_pns = [
+        (it.get("part_number") or "").strip().upper()
+        for it in bom if isinstance(it, dict)
+    ]
+    other_pns = [p for p in other_pns if p and p != pn]
+    if other_pns:
+        stage1["assembly_role"] = "ASSEMBLY"
+    else:
+        stage1["assembly_role"] = "PART"
+    return True
+
+
+def _detect_self_reference_bom(stage1: dict) -> bool:
+    """
+    אם ה-BOM מכיל רק שורות ש-P/N שלהן זהה ל-P/N של השרטוט עצמו —
+    זה Parts List סטנדרטי, לא מכלול אמיתי. מנקה את ה-bom_items ומסמן
+    role=PART. מחזיר True אם בוצע תיקון.
+    """
+    pn = (stage1.get("part_number") or "").strip().upper()
+    items = stage1.get("bom_items") or []
+    if not pn or not items:
+        return False
+    item_pns = [
+        (it.get("part_number") or "").strip().upper()
+        for it in items if isinstance(it, dict)
+    ]
+    non_empty = [p for p in item_pns if p]
+    if not non_empty:
+        return False
+    # כל ה-items מצביעים לעצמו?
+    if all(p == pn for p in non_empty):
+        stage1["bom_items"] = []
+        stage1["assembly_role"] = "PART"
+        return True
+    return False
+
+
+_SUSPECT_SPEC_LOWERCASE_RE = re.compile(r"\b(sm|ps|rafdocs|gen)[\s.-]?\d", re.ASCII)
+_KNOWN_SPEC_PREFIXES = ("PS-", "PS ", "SM-", "SM ", "RAFDOCS-", "GEN.", "GEN-",
+                       "MIL-", "AMS-", "AMS ", "ASTM ", "ISO ", "FED-", "NAS",
+                       "AS9100", "SAE-", "EN ISO", "EN-ISO", "AWS ", "QQ-",
+                       "ASME ")
+
+
+def _validate_spec_prefixes(standards: list) -> tuple[list[str], list[str]]:
+    """
+    מחזיר (standards_kept, warnings).
+    מזהה שני דפוסים חשודים:
+    1. prefix באותיות קטנות (sm/ps/rafdocs/gen) → כנראה שגיאת OCR, סמן warning.
+    2. prefix לא מוכר (לא ברשימת הפרפיקסים המוכרים) → warning חזק יותר.
+
+    אנחנו לא מוחקים תקנים — רק מדווחים כדי שהמשתמש יבחן.
+    """
+    if not standards:
+        return [], []
+    warnings: list[str] = []
+    kept: list[str] = []
+    for std in standards:
+        std_text = str(std or "").strip()
+        if not std_text:
+            continue
+        kept.append(std_text)
+        # אותיות קטנות?
+        if _SUSPECT_SPEC_LOWERCASE_RE.match(std_text):
+            warnings.append(
+                f"[WARN][LOWERCASE_SPEC_PREFIX] תקן '{std_text}' באותיות קטנות — "
+                f"בד\"כ שגיאת OCR. הצורה הנכונה באות גדולה (PS-/SM-/RAFDOCS-)."
+            )
+            continue
+        # prefix ידוע?
+        std_upper = std_text.upper()
+        if not any(std_upper.startswith(p) for p in _KNOWN_SPEC_PREFIXES):
+            # נבדוק גם prefixes של 2-3 אותיות שלא שמנו מפורשות
+            head = re.match(r"^([A-Z]{2,6})[\s\-.]?\d", std_upper)
+            if head:
+                prefix = head.group(1)
+                # אם prefix קצר מדי או לא נראה סטנדרטי
+                if len(prefix) < 2:
+                    warnings.append(
+                        f"[WARN][UNKNOWN_SPEC_PREFIX] תקן '{std_text}' עם prefix "
+                        f"לא מוכר — אמתי ידנית."
+                    )
+    return kept, warnings
+
+
+def _validate_dwg_prefix(stage1: dict) -> str:
+    """
+    בודק שה-DRAWING NUMBER מתחיל בקידומת ידועה של הלקוח. אם לא — מנסה
+    לתקן אם המחרוזת מכילה את הקידומת במקום אחר (OCR סידר אחרת).
+    מחזיר הודעת אזהרה אם לא ניתן היה לתקן בביטחון.
+    """
+    dwg = (stage1.get("drawing_number") or "").strip()
+    customer = (stage1.get("customer") or "").strip().upper()
+    if not dwg:
+        return ""
+    prefixes = _CUSTOMER_PREFIXES.get(customer, ())
+    if not prefixes:
+        # אפשר להסיק לקוח גם מהקידומת של ה-P/N
+        pn_upper = (stage1.get("part_number") or "").strip().upper()
+        for key, vals in _CUSTOMER_PREFIXES.items():
+            if any(pn_upper.startswith(p) for p in vals):
+                prefixes = vals
+                break
+    if not prefixes:
+        return ""
+    dwg_upper = dwg.upper()
+    if any(dwg_upper.startswith(p.upper()) for p in prefixes):
+        return ""
+    # ניסיון תיקון: אם הקידומת מופיעה בסוף, הסר אותה ושים בתחילה
+    for p in prefixes:
+        pu = p.upper()
+        if dwg_upper.endswith(pu):
+            corrected = p + dwg[:-len(p)]
+            stage1["drawing_number"] = corrected
+            return (
+                f"[INFO][DWG_PREFIX_REORDERED] DWG '{dwg}' תוקן ל-'{corrected}' "
+                f"(הקידומת '{p}' היתה בסוף)"
+            )
+        if pu in dwg_upper and not dwg_upper.startswith(pu):
+            # קידומת באמצע — סמן כ-warning אבל אל תתקן אוטומטית
+            return (
+                f"[WARN][DWG_PREFIX_MISMATCH] DWG '{dwg}' אמור להתחיל ב-'{p}' "
+                f"עבור לקוח {customer or 'לא ידוע'} אבל הקידומת נמצאת באמצע."
+            )
+    return (
+        f"[WARN][DWG_PREFIX_MISSING] DWG '{dwg}' לא מתחיל בקידומת ידועה "
+        f"({'/'.join(prefixes)}) עבור לקוח {customer or 'לא ידוע'}."
+    )
+
+
+# ───────────────────────────────────────────────────────────────
 # 1. חילוץ שרטוט בודד במצב Assembly
 # ───────────────────────────────────────────────────────────────
 def extract_assembly_drawing(pdf_path: str | Path) -> dict:
@@ -397,11 +778,13 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
     stage2, usage2 = _call_vision(client, deployment, s2_prompt, images)
     tracker.add_stage("assembly_stage_2_full", calculate_cost(usage2, deployment))
 
-    # Fallback ל-part_number כמו ב-extractor הרגיל
-    if not (stage1.get("part_number") or "").strip():
-        dn = (stage1.get("drawing_number") or "").strip()
-        if dn:
-            stage1["part_number"] = dn
+    # Reconcile ל-part_number: תיקון OCR confusion (B↔8) + השלמה מ-drawing/filename
+    reconcile_part_number(stage1, pdf_path.name)
+
+    # DWG=PN fallback (Mechanico-Shaftech / Elbit — אין שדה DWG נפרד)
+    # + Rev fallback מטבלת REVISIONS או מהסיומת בשם הקובץ
+    reconcile_drawing_number(stage1)
+    reconcile_revision(stage1, pdf_path.name)
 
     # Fallback לחומר — אם המודל החזיר ריק אבל OCR הצליח לקרוא MATERIAL
     if not (stage1.get("material") or "").strip() and ocr_text:
@@ -412,6 +795,204 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
                 f"[Assembly] 🧪 חומר הושלם מ-OCR: {material_from_text[:60]}"
             )
 
+    # ניקוי BOM: OCR לפעמים קורא טקסט בלולאה וחוזר על "NOM. SIZE 0.250-0.218"
+    # עשרות פעמים. ה-post-processing כאן משאיר את הביטוי פעם אחת.
+    bom_fixed = clean_bom_items_in_place(stage1.get("bom_items") or [])
+    if bom_fixed:
+        logger.info(
+            "[Assembly] 🧹 ניקוי BOM: %d תיאורים נוקו מזיהום OCR", bom_fixed
+        )
+
+    # נרמול ביטויים ידועים (Z0 SQUEGLIA, SAE-AMS-C-26074) — רקורסיבי על כל
+    # המחרוזות ב-stage1/stage2, כולל פרטי שלבים, תקנים, והערות.
+    phrase_corrections = normalize_known_phrases_in_place(stage1)
+    phrase_corrections += normalize_known_phrases_in_place(stage2)
+    if phrase_corrections:
+        logger.info(
+            "[Assembly] 🔧 נרמול ביטויים: %s", ", ".join(phrase_corrections)
+        )
+
+    # ולידציית חומר: תקני QQ- הם לרוב ישנים והוחלפו ב-AMS
+    material = (stage1.get("material") or "").strip()
+    material_warnings: list[str] = []
+    if material and re.search(r"\bQQ-[A-Z]", material, re.IGNORECASE):
+        msg = (
+            f"[INFO][POSSIBLE_OBSOLETE_SPEC] חומר מכיל prefix 'QQ-' — "
+            f"בדקי אם התקן נכון ("
+            f"לרוב הוחלף ב-AMS/ASTM): {material}"
+        )
+        material_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # Self-reference BOM: אם ה-Parts List מצביע רק לעצמו — זה PART, לא ASSEMBLY
+    validation_warnings: list[str] = []
+    if _detect_self_reference_bom(stage1):
+        msg = (
+            f"[INFO][SELF_REF_BOM] BOM הכיל רק self-reference של "
+            f"{stage1.get('part_number')} — סווג כ-PART ולא ASSEMBLY"
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # Role default: אם המודל החזיר assembly_role ריק — הסק לפי BOM
+    if _default_role_if_missing(stage1):
+        msg = (
+            f"[INFO][ROLE_AUTODETECTED] assembly_role היה ריק — סווג אוטומטית "
+            f"כ-'{stage1.get('assembly_role')}' לפי תוכן BOM"
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # DWG inference: אם אין drawing_number נפרד — השתמש ב-P/N (לקוחות קטנים)
+    if _infer_drawing_number_from_pn(stage1):
+        msg = (
+            f"[INFO][DWG_INFERRED_FROM_PN] drawing_number היה ריק — הושלם "
+            f"מ-P/N ('{stage1.get('drawing_number')}')"
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # Material formerly: אם החומר מכיל '(FORMERLY ...)' — הפרד ל-material_formerly
+    if _split_material_formerly(stage1):
+        msg = (
+            f"[INFO][MATERIAL_FORMERLY_SPLIT] תקני חומר מבוטלים הועברו לשדה "
+            f"material_formerly: {stage1.get('material_formerly', '')}"
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # DWG prefix: לבקוחות ידועים (BIRD=BAS, RAFAEL=BP/MMA/...) ה-DWG מתחיל בקידומת
+    dwg_warning = _validate_dwg_prefix(stage1)
+    if dwg_warning:
+        validation_warnings.append(dwg_warning)
+        logger.info("[Assembly] ℹ️ %s", dwg_warning)
+
+    # Hallucination check: תקנים שלא מופיעים בטקסט ה-OCR — כנראה הזיה
+    standards = stage2.get("standards") or []
+    if standards and ocr_text:
+        retained, flagged = _validate_standards_against_ocr(standards, ocr_text)
+        if flagged:
+            stage2["standards"] = retained
+            for std in flagged:
+                msg = (
+                    f"[WARN][POSSIBLE_HALLUCINATION] תקן '{std}' לא נמצא "
+                    f"בטקסט ה-OCR של השרטוט — ייתכן שהמודל ממציא"
+                )
+                validation_warnings.append(msg)
+                logger.warning("[Assembly] ⚠️ %s", msg)
+
+    # Spec prefix validation: מזהה prefix באותיות קטנות (sm111 → PS-111) ו-prefix
+    # לא מוכר. רק warnings — לא משנה את התוכן.
+    _, spec_warnings = _validate_spec_prefixes(stage2.get("standards") or [])
+    for w in spec_warnings:
+        validation_warnings.append(w)
+        logger.info("[Assembly] ℹ️ %s", w)
+
+    # PACKING missing: בשרטוטי PRC זה סעיף חובה (70.x / 80.x / 100.x).
+    # אם המודל לא חילץ אותו, יתכן שהוא פספס — סמן לבדיקה ידנית.
+    pkg = stage2.get("packaging_notes") or {}
+    pkg_en = (pkg.get("en") or "").strip() if isinstance(pkg, dict) else ""
+    pkg_he = (pkg.get("he") or "").strip() if isinstance(pkg, dict) else ""
+    pkg_has_content = bool(pkg_en or pkg_he)
+    pkg_explicit_none = (
+        "NO_PACKING_REQUIREMENT" in pkg_en.upper()
+        or "NO_PACKING_REQUIREMENT" in pkg_he.upper()
+    )
+    role = (stage1.get("assembly_role") or "").strip().upper()
+    if role == "PART" and pkg_explicit_none:
+        msg = (
+            "[INFO][NO_PACKING_REQUIREMENT_IN_DRAWING] השרטוט אינו כולל "
+            "דרישת אריזה — המודל סימן זאת במפורש."
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+    elif role == "PART" and not pkg_has_content:
+        # אריזה ריקה בלי סימון מפורש — כנראה המודל דילג
+        msg = (
+            f"[INFO][MISSING_PACKING] סעיף PACKING לא חולץ לשרטוט PART — "
+            f"יתכן שהמודל דילג עליו (נפוץ בשרטוטי PRC עם סעיף אחרון 70.x/80.x/100.x)."
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # SERVICEABILITY TAG missing: בשרטוטי PRC סעיף FINAL APPROVAL מכיל בד"כ
+    # שני שלבים: VISUAL INSPECTION + SERVICEABILITY TAG. המודל לעיתים שוכח
+    # את השני — סמן לבדיקה.
+    if role == "PART":
+        final_list = stage2.get("final_approval") or []
+        final_text = " ".join(
+            str(s.get("name_en", "")) + " " + str(s.get("name_he", ""))
+            for s in final_list if isinstance(s, dict)
+        ).upper()
+        if final_list and "SERVICEABILITY" not in final_text and "תקינות" not in final_text:
+            msg = (
+                "[INFO][MISSING_SERVICEABILITY_TAG] סעיף FINAL APPROVAL חסר "
+                "שלב 'SERVICEABILITY TAG' — בשרטוטי PRC סעיף זה מכיל בד\"כ "
+                "גם VISUAL INSPECTION וגם SERVICEABILITY TAG."
+            )
+            validation_warnings.append(msg)
+            logger.info("[Assembly] ℹ️ %s", msg)
+
+    # GENERAL INSTRUCTIONS missing: בשרטוטי PRC זה שדה שחולץ ב-stage1, אבל
+    # המודל לעיתים מתעלם ממנו. סמן אם role=PART ואין הוראות.
+    gen_instr = stage1.get("general_instructions") or []
+    if role == "PART" and not gen_instr:
+        msg = (
+            "[INFO][MISSING_GENERAL_INSTRUCTIONS] שדה general_instructions ריק "
+            "— בשרטוטי PRC לרוב יש הוראות בסעיף 10 או 20.x "
+            "('THIS DRAWING SHALL BE USED WITH...', 'DIMENSIONAL LIMITS APPLY...')"
+        )
+        validation_warnings.append(msg)
+        logger.info("[Assembly] ℹ️ %s", msg)
+
+    # ─── ולידטורים כלליים מ-core/validators.py (משותפים למצב יחיד ולמכלולים) ───
+    # מוסיפים כאן כדי שמצב מכלולים יקבל את אותן בדיקות הזיה שיש למצב יחיד:
+    # SUSPICIOUS_STANDARD (קידומת גוף-תקינה), MISSING_SURFACE_PREP, MISSING_POST_PROCESS,
+    # INVALID_RAL, UNKNOWN_PAINT_BRAND, MISCLASSIFIED_COATING.
+    # ⚠️ validate_packing_note לא נכלל — למכלולים יש בדיקת packing ייעודית
+    #    מוקדם יותר שמתחשבת ב-assembly_role == PART.
+    _merged = {**stage1, **stage2}
+    # רוב הולידטורים מקבלים את ה-report המלא; validate_coating_classification
+    # מקבלת רשימה בלבד, לכן נקראת בנפרד עם coating_processes ישיר.
+    _dict_validators = [
+        validate_standards,
+        validate_surface_prep_and_post_process,
+        validate_ral_codes,
+        validate_all_paint_brands,
+    ]
+    _validator_calls = [(v, _merged) for v in _dict_validators]
+    _validator_calls.append(
+        (validate_coating_classification, stage2.get("coating_processes", []))
+    )
+    for _validator, _arg in _validator_calls:
+        try:
+            for _w in _validator(_arg) or []:
+                _sev = _w.get("severity", "INFO")
+                _type = _w.get("type", "VALIDATION")
+                _msg_text = _w.get("message", "")
+                _composed = f"[{_sev}][{_type}] {_msg_text}"
+                validation_warnings.append(_composed)
+                logger.info("[Assembly] %s %s", "⚠️" if _sev == "HIGH" else "ℹ️", _composed)
+        except Exception as exc:  # pragma: no cover — ולידטור אחד לא מפיל את האחרים
+            logger.warning("Validator %s failed: %s", _validator.__name__, exc)
+
+    # Warning: P/N שחולץ שונה מה-P/N שבשם הקובץ (לא OCR typo — מקרה ששווה דיגלי)
+    pn_warnings: list[str] = []
+    fname_pn = extract_pn_from_filename(pdf_path.name)
+    final_pn = (stage1.get("part_number") or "").strip()
+    if (
+        fname_pn
+        and final_pn
+        and fname_pn.upper() != final_pn.upper()
+        and combined_pn_distance(final_pn, fname_pn) > 2
+    ):
+        msg = (
+            f"[WARN][FILENAME_PN_MISMATCH] filename contains '{fname_pn}' "
+            f"but extracted P/N is '{final_pn}'"
+        )
+        pn_warnings.append(msg)
+        logger.warning("[Assembly] ⚠️ %s", msg)
+
     result = {
         **stage1,
         **stage2,
@@ -419,6 +1000,13 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
         "_cost_info": tracker.summary(),
         "_ocr_used": ocr_used,
     }
+    extra_warnings = list(pn_warnings) + material_warnings + validation_warnings
+    if phrase_corrections:
+        extra_warnings.append(
+            f"[INFO][OCR_PHRASE_NORMALIZED] {', '.join(phrase_corrections)}"
+        )
+    if extra_warnings:
+        result["_pn_warnings"] = extra_warnings
     tracker.save_to_log()
     logger.info(
         f"[Assembly] ✅ {pdf_path.name} | עלות: ${tracker.total_cost():.4f}"
@@ -470,9 +1058,20 @@ def extract_assembly_overview_image(image_path: str | Path) -> dict:
     data.setdefault("customer", "")
     data.setdefault("material", "")
     data.setdefault("quantity", "")
+    data.setdefault("catalog_number", "")
+    data.setdefault("raw_weight", {"qty": "", "unit": ""})
+    data.setdefault("alternative_material", "")
+    data.setdefault("general_instructions", [])
+    data.setdefault("os_level", "")
+    data.setdefault("cage_code", "")
+    data.setdefault("material_formerly", "")
+    data.setdefault("environment_requirements", [])
+    data.setdefault("title", "")
+    data.setdefault("part_weight", {"qty": "", "unit": ""})
     data["assembly_role"] = "Assembly Overview Image"
     data.setdefault("bom_items", [])
-    for k in ("machining_processes", "coating_processes", "painting_processes",
+    for k in ("machining_processes", "welding_processes", "heat_treatment_processes",
+              "coating_processes", "painting_processes", "ndt_processes",
               "inspection_processes", "additional_processes", "standards"):
         data.setdefault(k, [])
     data.setdefault("final_approval", "")
@@ -515,6 +1114,10 @@ def _summarize_drawing_for_prompt(d: dict, idx: int) -> str:
 
     # תהליכים מרוכזים
     procs = []
+    if d.get("welding_processes"):
+        procs.append(f"ריתוך×{len(d['welding_processes'])}")
+    if d.get("heat_treatment_processes"):
+        procs.append(f"טיפול חום×{len(d['heat_treatment_processes'])}")
     for c in d.get("coating_processes", []) or []:
         if isinstance(c, dict):
             t = c.get("type_he") or c.get("type") or c.get("name") or ""
@@ -525,6 +1128,8 @@ def _summarize_drawing_for_prompt(d: dict, idx: int) -> str:
             t = p.get("type_he") or p.get("type") or p.get("name") or ""
             s = p.get("standard") or ""
             procs.append(f"{t} ({s})".strip())
+    if d.get("ndt_processes"):
+        procs.append(f"NDT×{len(d['ndt_processes'])}")
 
     bom_items = d.get("bom_items") or []
     bom_text = ""
@@ -570,6 +1175,11 @@ def analyze_relationships(results: list[dict]) -> dict:
             "_cost_info": {},
         }
 
+    # Cross-reference P/N של שרטוטים PART מול BOM של שרטוטי ASSEMBLY.
+    # מתקן אוטומטית טעויות OCR כמו BBJ10223A → BB1J0223A (סדר ספרות)
+    # או BNB0760B → BN80760B (8↔B).
+    pn_corrections = cross_reference_part_numbers(results)
+
     drawings_text = "\n\n".join(
         _summarize_drawing_for_prompt(d, i + 1) for i, d in enumerate(results)
     )
@@ -596,6 +1206,30 @@ def analyze_relationships(results: list[dict]) -> dict:
         analysis["warnings_he"].append(
             f"[HIGH][IMAGE_FILTERED] {removed} overview image node(s) removed from assemblies tree"
         )
+
+    # אם המודל החזיר מספר roots אבל אחד מהם נמצא כ-child של אחר — הורד אותו מה-top level.
+    demoted = _demote_nested_roots(analysis)
+    if demoted:
+        analysis["warnings_he"].append(
+            f"[INFO][ROOT_DEMOTED] {demoted} nested root(s) moved to children level"
+        )
+
+    if pn_corrections:
+        analysis["warnings_he"].extend(
+            f"[INFO][PN_AUTOCORRECT] {msg}" for msg in pn_corrections
+        )
+
+    # הפץ אזהרות ברמת השרטוט הבודד (למשל FILENAME_PN_MISMATCH) לאזהרות הכלליות
+    for d in results or []:
+        if not isinstance(d, dict):
+            continue
+        for w in d.get("_pn_warnings") or []:
+            analysis["warnings_he"].append(
+                f"{w} (קובץ: {d.get('source_filename', '?')})"
+            )
+
+    # Cross-reference של P/N בהוראות סימון — דגל כשמסמנים P/N אחר מהחלק עצמו
+    analysis["warnings_he"].extend(_scan_marking_pn_mismatch(results, analysis))
 
     tree_warnings = _validate_product_tree(analysis, results)
     analysis["warnings_he"].extend(tree_warnings)

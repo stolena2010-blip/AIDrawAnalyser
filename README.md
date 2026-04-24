@@ -1,4 +1,4 @@
-# 📐 DrawingAI Lite
+# 📐 AIDrawAnalyser
 
 [![CI](https://github.com/stolena2010-blip/draw_ai_lite/actions/workflows/ci.yml/badge.svg)](https://github.com/stolena2010-blip/draw_ai_lite/actions/workflows/ci.yml)
 
@@ -54,7 +54,7 @@
 
 ### 2. venv + חבילות
 ```powershell
-cd C:\DrawingLight
+cd C:\AIDrawAnalyser
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
@@ -87,7 +87,7 @@ pytest tests/ -v
 ## מבנה
 
 ```
-DrawingLight/
+AIDrawAnalyser/
 ├── app.py                  ← Streamlit entry (מצב 'שרטוט בודד')
 ├── ui_assembly.py          ← מסך 'מכלולים מרובים'
 ├── core/

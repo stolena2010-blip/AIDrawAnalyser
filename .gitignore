@@ -19,12 +19,16 @@ output/*.xlsx
 output/*.txt
 output/*.jsonl
 output/*.pdf
+output/*.csv
 output/.cache/
 output/_runtime_settings.json
 !output/.gitkeep
 
 # Test drawings (user-specific, often confidential)
 draws/
+
+# User reports folder (local experiments — often confidential drawings)
+REPORTS/
 
 # Backup files
 *.bak

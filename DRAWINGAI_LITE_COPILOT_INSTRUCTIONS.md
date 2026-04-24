@@ -1,4 +1,4 @@
-# DrawingAI Lite — הנחיות בנייה ל-GitHub Copilot
+# AIDrawAnalyser — הנחיות בנייה ל-GitHub Copilot
 
 > **מטרה:** לבנות אפליקציית Streamlit עצמאית שמאפשרת למשתמש בודד להעלות שרטוט PDF, לקבל ניתוח אוטומטי של נתוני השרטוט, להציג אותם במסך ולשמור לקובץ. ללא מייל, ללא PL, ללא אוטומציה.
 
@@ -32,10 +32,10 @@
 **מיקום:** GitHub repo קיים
 **טכנולוגיה:** Python + Azure OpenAI Vision (GPT-4o / GPT-5.4) + Streamlit
 
-### מה DrawingAI Pro עושה
+### מה AIDrawAnalyser Pro עושה
 מערכת אוטומציה מלאה: קוראת מיילים מ-`quotes_check@algat.co.il`, מורידה שרטוטים, מנתחת עם AI Vision, שולחת תוצאות חזרה. יש בה 5 מסלולים (הצעות, הזמנות, תעודות, חשבוניות, תלונות) ו-pipeline של 5 שלבי חילוץ.
 
-### מה DrawingAI Lite יעשה
+### מה AIDrawAnalyser יעשה
 **רק את שלבי 1-3 של החילוץ**, ללא שום קשר למייל:
 - ❌ אין Graph API
 - ❌ אין automation runner
@@ -690,7 +690,7 @@ def build_enhanced_prompt(base_prompt: str, ocr_text: str) -> str:
 
 ```python
 """
-חילוץ נתונים משרטוט PDF — מודול ראשי של DrawingAI Lite.
+חילוץ נתונים משרטוט PDF — מודול ראשי של AIDrawAnalyser.
 עם Cost Tracking + OCR Fallback.
 """
 import json
@@ -845,7 +845,7 @@ def extract_drawing(pdf_path: str | Path, use_ocr_fallback: bool = True) -> dict
 
 ```python
 """
-DrawingAI Lite — Streamlit UI
+AIDrawAnalyser — Streamlit UI
 אפליקציה למשתמש בודד לניתוח שרטוט PDF.
 """
 import json
@@ -866,7 +866,7 @@ from storage.save_handler import save_to_json, save_to_excel
 logging.basicConfig(level=logging.INFO)
 
 st.set_page_config(
-    page_title="DrawingAI Lite",
+    page_title="AIDrawAnalyser",
     page_icon="📐",
     layout="wide",
 )
@@ -878,7 +878,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # ═══════════════════════════════════════════════════════════════
 # UI
 # ═══════════════════════════════════════════════════════════════
-st.title("📐 DrawingAI Lite")
+st.title("📐 AIDrawAnalyser")
 st.caption("ניתוח אוטומטי של שרטוטים טכניים — משתמש בודד")
 
 # Session state
@@ -1066,7 +1066,7 @@ if st.session_state.result:
 with st.sidebar:
     st.markdown("### ℹ️ אודות")
     st.markdown("""
-    **DrawingAI Lite v1.0**
+    **AIDrawAnalyser v1.0**
     
     - העלאה ידנית של PDF יחיד
     - ניתוח AI עם Azure OpenAI Vision
@@ -1321,4 +1321,4 @@ streamlit run app.py
 
 ---
 
-*נוצר לצורך בניית DrawingAI Lite — גרסה מצומצמת של DrawingAI Pro לשימוש משתמש בודד*
+*נוצר לצורך בניית AIDrawAnalyser — גרסה מצומצמת של AIDrawAnalyser Pro לשימוש משתמש בודד*

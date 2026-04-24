@@ -25,7 +25,23 @@ logger = logging.getLogger(__name__)
 
 # העלאה כשמשנים את pipeline — מבטל cache ישן
 # v2: החזרת OCR-always-on ב-Stage 1 (תיקון regression: material wrong)
-CACHE_VERSION = "v2"
+# v3: שדרוג stage_2 prompts (סיווג SURFACE TREATMENT, הטמעת תקנים, additional step_no+details)
+# v4: שדרוג stage_1 (תיקון OCR 8↔B ברפאל) + stage_2 (marking method / packaging מפורט / multi-page)
+# v5: stage_1 (P/N transposition + OCOLONE) + relationships (hierarchy) + BOM cross-ref + nested-root demote
+# v6: הוספת insertion/deletion distance ב-P/N (BP7053A ↔ BP70534A) + קריאת cross-ref מוקדמת ב-UI
+# v7: 7↔T OCR pair + pn/dwg normalization + purchased-parts בעץ + OCR_UNREADABLE BOM flag
+# v8: ניקוי כפילויות OCR בתיאורי BOM + FILENAME_PN_MISMATCH warning + MARKING_PN_CROSS_REF scan
+# v9: קטגוריות חדשות (welding/heat_treatment/NDT) + עיקרון content>step_no + MATERIAL rule + ENGRAVING rule
+# v10: PAINTING section (TEXT COLOR) + ENGRAVING full content + 100% prefix + Z0 SQUEGLIA/AMSC normalization + QQ- obsolete spec warning
+# v11: hallucination check (standards vs OCR) + self-ref BOM → PART + DWG prefix validator (BIRD=BAS) + hierarchical classification + UOS block
+# v12: PRC fields (catalog_number/raw_weight/alternative_material/general_instructions) + PACKING mandatory + compound-step split + lowercase-spec warning
+# v13: content-first classification + SERVICEABILITY TAG rule + TO-PS-DOC OCR normalization + os_level field + GENERAL INSTRUCTIONS also in section 20
+# v14: Elbit customer profile + cage_code/material_formerly/environment_requirements fields + auto role=PART + FILLETS keyword + UOS ASME hints
+# v15: DWG=P/N inference + REVISIONS table Rev fallback + Pickling/H-Embrittlement keywords + [NO_PACKING_REQUIREMENT_IN_DRAWING] + title/part_weight + Mechanico-Shaftech profile
+# v16: code-level fallbacks (reconcile_drawing_number + reconcile_revision) + new validators (SUSPICIOUS_STANDARD + MISSING_SURFACE_PREP + MISSING_POST_PROCESS + MISSING_PACKING empty flag) + REMOVE BURRS prompt fix + revisions_history field
+# v17: Tesseract OCR binary installed + ocr_fallback.py reads TESSERACT_PATH from env → OCR now actually runs (was silently disabled before), feeding OCR text to Stage 1/2 prompts and enabling material/standards cross-validation
+# v18: assembly.py now runs generic validators (SUSPICIOUS_STANDARD / MISSING_SURFACE_PREP / MISSING_POST_PROCESS / INVALID_RAL / UNKNOWN_PAINT_BRAND / MISCLASSIFIED_COATING) — previously these fired only in single mode
+CACHE_VERSION = "v18"
 
 _CACHE_DIR = Path("output/.cache")
 

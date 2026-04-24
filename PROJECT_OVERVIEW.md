@@ -1,4 +1,4 @@
-# 📐 DrawingAI Lite — סקירת פרויקט מפורטת
+# 📐 AIDrawAnalyser — סקירת פרויקט מפורטת
 
 > אפליקציית Streamlit לחילוץ אוטומטי של מידע משרטוטים הנדסיים (PDF) באמצעות
 > Azure OpenAI Vision / Reasoning. תומכת בשני מצבי עבודה: **שרטוט בודד** עם
@@ -55,7 +55,7 @@
 ## מבנה התיקיות
 
 ```
-DrawingLight/
+AIDrawAnalyser/
 ├── app.py                      # נקודת כניסה ראשית של Streamlit
 ├── ui_assembly.py              # מסך מצב 'מכלולים מרובים'
 ├── requirements.txt
@@ -108,8 +108,8 @@ DrawingLight/
 
 ```powershell
 # 1. שכפול
-git clone <repo> DrawingLight
-cd DrawingLight
+git clone <repo> AIDrawAnalyser
+cd AIDrawAnalyser
 
 # 2. סביבה וירטואלית
 python -m venv .venv

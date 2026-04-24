@@ -17,6 +17,7 @@ from core.assembly import (
     extract_assembly_overview_image,
     analyze_relationships,
 )
+from core.pn_utils import cross_reference_part_numbers
 from storage.save_handler import save_to_json
 from storage.pdf_report import (
     build_assembly_pdf,
@@ -77,6 +78,63 @@ def _render_drawing_card(d: dict):
     mat = d.get("material") or "—"
     qty = d.get("quantity") or "—"
     role = d.get("assembly_role") or "—"
+    cat = (d.get("catalog_number") or "").strip()
+    rw = d.get("raw_weight") or {}
+    rw_qty = (rw.get("qty") or "").strip() if isinstance(rw, dict) else ""
+    rw_unit = (rw.get("unit") or "").strip() if isinstance(rw, dict) else ""
+    raw_weight_text = (
+        f"{rw_qty} {rw_unit}".strip() if rw_qty or rw_unit else ""
+    )
+    alt_mat = (d.get("alternative_material") or "").strip()
+    os_lvl = (d.get("os_level") or "").strip()
+    cage = (d.get("cage_code") or "").strip()
+    mat_formerly = (d.get("material_formerly") or "").strip()
+    title = (d.get("title") or "").strip()
+    pw = d.get("part_weight") or {}
+    pw_qty = (pw.get("qty") or "").strip() if isinstance(pw, dict) else ""
+    pw_unit = (pw.get("unit") or "").strip() if isinstance(pw, dict) else ""
+    part_weight_text = f"{pw_qty} {pw_unit}".strip() if pw_qty or pw_unit else ""
+
+    extra_line = ""
+    extras = []
+    if title:
+        extras.append(f'<span style="color:#6c757d;">כותרת:</span> <b>{title}</b>')
+    if cat:
+        extras.append(f'<span style="color:#6c757d;">CAT NO.:</span> <b>{cat}</b>')
+    if cage:
+        extras.append(f'<span style="color:#6c757d;">CAGE:</span> <b>{cage}</b>')
+    if raw_weight_text:
+        extras.append(
+            f'<span style="color:#6c757d;">משקל חומר גלם:</span> '
+            f'<b>{raw_weight_text}</b>'
+        )
+    if part_weight_text:
+        extras.append(
+            f'<span style="color:#6c757d;">משקל פריט:</span> '
+            f'<b>{part_weight_text}</b>'
+        )
+    if os_lvl:
+        extras.append(
+            f'<span style="color:#6c757d;">OS Level:</span> '
+            f'<b style="color:#b02a37;">{os_lvl}</b>'
+        )
+    if extras:
+        extra_line = (
+            '<div style="margin-top:0.4em;">' + ' &nbsp;·&nbsp; '.join(extras)
+            + '</div>'
+        )
+
+    alt_line = ""
+    if alt_mat:
+        alt_line = (
+            f'<div style="margin-top:0.4em; font-style:italic; color:#495057;">'
+            f'🔄 חומר חלופי מורשה: {alt_mat}</div>'
+        )
+    if mat_formerly:
+        alt_line += (
+            f'<div style="margin-top:0.3em; font-style:italic; color:#6c757d;">'
+            f'📜 תקנים מבוטלים (formerly): {mat_formerly}</div>'
+        )
 
     st.markdown(
         f'<div dir="rtl" style="unicode-bidi:plaintext; text-align:right; '
@@ -93,9 +151,27 @@ def _render_drawing_card(d: dict):
         f'<div style="margin-top:0.4em;"><span style="color:#6c757d;">חומר:</span> <b>{mat}</b> '
         f'&nbsp;·&nbsp; <span style="color:#6c757d;">תפקיד:</span> <b>{role}</b> '
         f'&nbsp;·&nbsp; <span style="color:#6c757d;">כמות:</span> <b>{qty}</b></div>'
+        f'{extra_line}'
+        f'{alt_line}'
         f'</div>',
         unsafe_allow_html=True,
     )
+
+    # ─── הוראות כלליות (סעיף 10) ───
+    gen_instr = d.get("general_instructions") or []
+    if gen_instr and isinstance(gen_instr, list):
+        with st.expander("📜 הוראות כלליות", expanded=False):
+            for item in gen_instr:
+                if isinstance(item, str) and item.strip():
+                    st.markdown(f"- {item.strip()}")
+
+    # ─── תנאי סביבה (CLEAN ROOM / ESD / IPA) ───
+    env_req = d.get("environment_requirements") or []
+    if env_req and isinstance(env_req, list):
+        with st.expander("🌡️ תנאי סביבה / Clean Room", expanded=True):
+            for item in env_req:
+                if isinstance(item, str) and item.strip():
+                    st.markdown(f"- {item.strip()}")
 
     # ─── BOM (אם קיים) ───
     bom = d.get("bom_items") or []
@@ -134,6 +210,8 @@ def _render_drawing_card(d: dict):
 
     # ─── תהליכים בסדר העבודה ───
     _render_step_block("עיבוד שבבי", "🔧", d.get("machining_processes") or [])
+    _render_step_block("ריתוך", "🔥", d.get("welding_processes") or [])
+    _render_step_block("טיפול חום", "🌡️", d.get("heat_treatment_processes") or [])
 
     coatings = d.get("coating_processes") or []
     if coatings:
@@ -169,6 +247,7 @@ def _render_drawing_card(d: dict):
                 })
         st.dataframe(rows, use_container_width=True, hide_index=True)
 
+    _render_step_block("בדיקות NDT", "🔬", d.get("ndt_processes") or [])
     _render_step_block("בדיקות", "🔍", d.get("inspection_processes") or [])
     _render_step_block("אישור סופי", "✅", d.get("final_approval") or [])
 
@@ -178,7 +257,12 @@ def _render_drawing_card(d: dict):
         rows = []
         for a in add:
             if isinstance(a, dict):
-                rows.append({"אנגלית": a.get("name_en", ""), "עברית": a.get("name_he", "")})
+                rows.append({
+                    "שלב": a.get("step_no", ""),
+                    "אנגלית": a.get("name_en", ""),
+                    "עברית": a.get("name_he", ""),
+                    "פרטים": a.get("details", ""),
+                })
         if rows:
             st.dataframe(rows, use_container_width=True, hide_index=True)
 
@@ -422,10 +506,21 @@ def render_assembly_mode(output_dir: Path):
         # תמונת מכלול (Overview Image) תמיד ראשונה — היא מייצגת את כל
         # השרטוטים יחד, לא משנה באיזה סדר הועלתה.
         results.sort(key=lambda r: 0 if r.get("_is_overview_image") else 1)
+        # Cross-reference P/N של שרטוטים PART מול BOM של שרטוטי ASSEMBLY.
+        # מתקן שגיאות OCR נפוצות (BNB0760B → BN80760B, BBJ10223A → BB1J0223A,
+        # BP7053A → BP70534A) לפני הצגה למשתמש, כך שה-dropdown וכרטיסי השרטוטים
+        # מציגים כבר את הערכים התקינים.
+        pn_corrections = cross_reference_part_numbers(results)
+        st.session_state["asm_pn_corrections"] = pn_corrections
         st.session_state["asm_results"] = results
         st.session_state["asm_index"] = 0
         st.session_state["asm_relationships"] = None  # נדרש מחדש
         st.success(f"✅ נותחו {len(results)} שרטוטים")
+        if pn_corrections:
+            st.info(
+                "🔧 **תיקון P/N אוטומטי** (על סמך BOM של שרטוטים אחרים):\n\n"
+                + "\n".join(f"- {msg}" for msg in pn_corrections)
+            )
 
     results = st.session_state["asm_results"]
     if not results:

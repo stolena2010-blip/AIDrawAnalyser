@@ -2,102 +2,464 @@
 
 ⚙️ כללי Evidence קשיחים:
 - חלץ רק מה שמופיע במפורש בשרטוט (PRODUCTION ROUTING CHART, NOTES, Title Block, BOM).
-- אסור לנחש או להשלים.
-- העתק ערכים בדיוק כפי שכתובים, כולל קודי תקן וגוונים.
-- אם שדה לא קיים — החזר מחרוזת ריקה "".
-- אם NOTES בעברית RTL — קרא תו-אחר-תו.
-- אם לא ניתן לקרוא ערך (שם מותג, קוד RAL, מספר) → כתוב "[UNREADABLE]".
+- אסור לנחש, להשלים, או להסיק לפי "היגיון הנדסי".
+- העתק ערכים בדיוק כפי שכתובים, כולל קודי תקן, עוביים, גוונים וצבעים.
+- ⚠️ קריאת ספרות: "II" ≠ "I", "13" ≠ "12", "III" ≠ "II". קרא תו-אחר-תו.
+- אם שדה לא קיים — החזר מערך ריק [] או מחרוזת ריקה "".
+- אם NOTES בעברית RTL — קרא תו-אחר-תו. שילוב קודי תקן אנגליים אפשרי.
+- אם לא ניתן לקרוא ערך → כתוב "[UNREADABLE]".
 
-🎯 מצב 'מכלולים': נדרש לחלץ **את כל הסעיפים מטבלת ה-PRODUCTION ROUTING CHART**
-   (10 MATERIAL, 20 MACHINING, 30 SURFACE TREATMENT, 40 PAINTING, 50 INSPECTION,
-   60 FINAL APPROVAL, 70 PACKING וכו') — לפי הסדר שמופיעים.
+🎯 מצב 'מכלולים': חלץ **את כל הסעיפים מטבלת ה-PRODUCTION ROUTING CHART** לפי הסדר.
 
-חלץ את השדות הבאים:
+📄 **שרטוטים רב-עמודיים** (SHEET 1 OF 2, SHEET 2 OF 2):
+   חובה לנתח **את כל העמודים**. עמוד 2 לרוב מכיל FINAL MACHINING /
+   MEASUREMENT AREA / הוראות MOUNT.
 
-1. machining_processes — תהליכי עיבוד שבבי / יצור מכני (מערך, לפי סדר):
-   כל פריט:
+🏷️ הבחנה בין כותרת מדור לשלב:
+   • מספרים עגולים (10, 20, 30, 40, 50...) הם **כותרות מדור**.
+   • שלבים הם תמיד בפורמט X.Y (30.1, 30.2).
+   ⚠️ לשלב step_no חובה להיות בפורמט X.Y — אסור "30" לבד.
+
+═══════════════════════════════════════════════════════════════
+🔴 עיקרון סיווג מרכזי — **תוכן וקונטקסט, לא מספר שלב**
+═══════════════════════════════════════════════════════════════
+סדר העדיפויות לסיווג שלב:
+   1. **מילות מפתח בטקסט השלב** (Keyword) — הקריטריון הראשי.
+   2. **תפקיד השרטוט** (assembly_role / title): WELD ASSEMBLY / CASTING / MACHINED
+      PART / SHEET METAL משפיעים על פרשנות. למשל — WELD ASSEMBLY לרוב לא יכיל
+      turning / milling אמיתי.
+   3. **מספר השלב** — tiebreaker בלבד, **לא** מבסיס סיווג.
+
+⚠️ אזהרה קריטית: מספרי שלב **אינם אמינים**. ב-RAFAEL לבד `30.x` יכול להיות
+   ריתוך בשרטוט אחד, עיבוד שבבי בשרטוט אחר, או בדיקות בשלישי. אל תסווג לפי
+   מספור — סווג לפי **מה כתוב** בשלב.
+
+⚠️ **כותרת הסעיף-הורה לא קובעת את הקטגוריה של התת-שלב** כשיש מילת מפתח חזקה
+   בתוכן. דוגמה קריטית מ-H92386A:
+   ```
+   30 PREMACHINING
+     30.1 WELDING
+       30.1.1 TECHNICAL LOCATION HOLES/PINS WELDING
+       30.1.2 WELDING & INSPECTION ACC. TO: PS-DOC0002945
+   ```
+   30.1 מכיל "WELDING" → **welding_processes** (לא machining, לא additional!).
+   הכותרת "PREMACHINING" היא רק סימון של מיקום בתהליך, לא של הקטגוריה.
+   כלל: אם שלב **אחד** מכיל מילת מפתח מקטלוג → השתמש בה, גם אם הסעיף ההורה
+   ממוספר כ-MACHINING/FINISH/וכו'.
+
+📚 **קטלוג מילות מפתח לסיווג (מוביל את הקטגוריה הנכונה):**
+
+🔥 **welding_processes** — ריתוך / הלחמה:
+   WELD, WELDING, GTAW, GMAW, FCAW, SMAW, SAW, TIG, MIG,
+   WPS, FILLER METAL, ELECTRODE, PENETRATION, FUSION, ROOT PASS,
+   BRAZING, SOLDERING, AWS D1, AWS A5, EN ISO 15614, ISO 3834, ISO 2553.
+
+🔧 **machining_processes** — עיבוד שבבי:
+   REMOVE BURRS, DEBURR, INNER RADI(I), CHAMFER, MACHINING, MACHINE,
+   DRILL, TAP, THREAD, MILL, TURN, GRIND, BORING, REAM, COUNTERSINK,
+   COUNTERBORE, SURFACE FINISH, Ra, Rz, FINAL MACHINING,
+   FILLETS R, FILLET RADIUS, BREAK SHARP EDGES,
+   ENGRAVING (ללא MARK PART NUMBER — ראה כלל ENGRAVING למטה).
+   ⚠️ **REMOVE BURRS / BREAK SHARP EDGES — תמיד machining_processes**,
+      גם כש-UOS (item d/e). זו פעולה ייצורית פיזית. FILLETS R 0.3 MAX
+      שהוא מפרט גיאומטרי כללי ללא פעולה — יכול להיכנס ל-general_instructions.
+      הכלל המנחה: **פעולה פיזית → machining; מפרט גיאומטרי → general_instructions.**
+
+🌡️ **heat_treatment_processes** — טיפול חום:
+   HEAT TREAT, HEAT TREATMENT, ANNEAL, ANNEALING, NORMALIZE, TEMPER,
+   HARDEN, HARDENING, STRESS RELIEVE, SOLUTION TREAT, AGE, AGING,
+   QUENCH, HRC, HB, HV, AMS 2759, AMS 2770.
+   (⚠️ BAKING אחרי ציפוי נכנס ל-additional_processes, לא כאן — זה תהליך-לוואי
+    של ציפוי, לא טיפול חום עצמאי על החומר.)
+
+🎨 **coating_processes** — ציפוי/פלטינג/המרה כימית:
+   ANODIZE, ANODIZING, PLATE, PLATING, ELECTROPLATING, ELECTROLYTIC,
+   ELECTROLESS NICKEL, ZINC PLATE, NICKEL PLATE, CHROME PLATE,
+   PASSIVAT, PASSIVATE, CADMIUM, CONVERSION COATING, ALODINE, IRIDITE,
+   CHEM FILM, BLACK OXIDE, PHOSPHATING, PVD, CVD, THERMAL SPRAY,
+   HOT DIP GALVANIZE, ASTM A123.
+
+🖌️ **painting_processes** — צביעה:
+   PRIMER, TOPCOAT, PAINT, PAINTING, EPOXY, POLYURETHANE,
+   RAL, MIL-PRF, SSPC, ISO 8501, NACE, Sa (blast standard), DFT (μm),
+   **TEXT COLOR, MARKING COLOR, INK COLOR, CAUTION COLOR, LETTER COLOR**,
+   FED-STD-595 (צבעים סטנדרטיים).
+   ⚠️ סעיף עצמאי בשם `40 PAINTING` (או `70 PAINTING` / אחר) → **כל תכולתו**
+     היא painting_processes, **גם** אם זה רק `TEXT COLOR: RED`.
+
+🔬 **ndt_processes** — בדיקות NDT (Non-Destructive Testing):
+   PENETRANT, DYE PENETRANT, MAGNETIC PARTICLE, ULTRASONIC,
+   RADIOGRAPH, X-RAY, GAMMA, EDDY CURRENT, LEAK TEST,
+   NDE, NDT, PT, MT, UT, RT (כשמופיעים כקיצור בדיקה), ASTM E1444,
+   ASTM E709, EN ISO 9934, EN ISO 17636.
+
+🔍 **inspection_processes** — בדיקה/אימות כללי:
+   VISUAL INSPECTION, DIMENSIONAL, SAMPLING, INSPECTION REPORT,
+   VERIFY, CHECK, MEASURE, ACCEPTANCE CRITERIA, LOT, FIRST ARTICLE,
+   FAI, CMM, GAUGE, ACTUAL RESULTS, 100% INSPECTION, X20/X24 MICROSCOPIC.
+   (⚠️ כל VERIFY/INSPECT/CHECK של ציפוי/שטח → כאן, לא ב-coating.)
+
+🏷️ **additional_processes** (תהליכי סימון / הכנה / לוואי / post-process):
+   • **סימון**: MARK PART NUMBER, INK STAMP, LABEL, SERIAL NUMBER, LOT NUMBER,
+     LASER MARKING, SILK SCREEN, PAD PRINT, INK JET.
+   • **post-process** (אחרי ציפוי/ריתוך): BAKING, HYDROGEN EMBRITTLEMENT RELIEF,
+     HYDROGEN DEGASSING, DEHYDROGENATION, POST-PLATE BAKE, HYDROGEN RELIEF.
+     ⚠️ **HYDROGEN EMBRITTLEMENT TREATMENT / RELIEF** הוא **תמיד** additional_processes,
+        לא ציפוי ולא בלתי-מסווג. זהו post-plating baking לפלדות קשות (למשל
+        AISI 4340, 17-4PH).
+   • **הכנת שטח / Surface Preparation** (pre-coating):
+     - PICKLING (ניקוי חמצון כימי) — עם NITRIC ACID / HNO3 / HYDROFLUORIC ACID / HF
+     - REMOVE TINT / TINT REMOVAL (ניקוי חמצון אחרי ריתוך/HT)
+     - ETCHING / CHEMICAL ETCH
+     - ALKALINE CLEAN / DEGREASE
+     - SAND BLAST / SHOT PEENING / GLASS BEAD (pre-treatment, לא כציפוי!)
+     - PASSIVATION CLEANING (ניקוי, שונה מציפוי passivation).
+     ⚠️ **PICKLING** עם פרמטרים (טמפ'/אחוזים/זמנים) חובה לחלץ את כל הפרמטרים
+        ב-details. דוגמה: "10% HNO3 + 2% HF at 43-60°C".
+   • **אחר**: MASKING, DEMASKING, MOUNT PART ACCORDING TO,
+     INSERT INSTALLATION (Helicoil), CORROSION INHIBITOR, TAG & BAG.
+
+📦 **packaging_notes** — אריזה.
+
+═══════════════════════════════════════════════════════════════
+🔑 כללים ספציפיים קריטיים
+═══════════════════════════════════════════════════════════════
+
+🌳 **כלל היררכי — הורש קטגוריה מהסעיף-הורה**:
+ב-NOTES ממוספר היררכית (למשל שרטוטי BIRD AEROSYSTEMS, BOEING, AIRBUS),
+הקטגוריה של תת-שלב נגזרת מסעיף ההורה שלו, **לא** מהמילים שבטקסט שלו.
+דוגמה ממשרטוט BIRD AEROSYSTEMS:
+```
+3. IDENTIFICATION & MARKING   ← parent = סימון
+   3.1 MARK PART PER DWG       → additional (סימון)
+4. FINISH                      ← parent = ציפוי
+   4.1 MASK DESIGNATED SURFACES, PRECISE HOLES
+       → **coating/additional (הכנה לציפוי)** — לא inspection!
+   4.2 ZINC COATING PER...     → coating
+5. INSPECTION                  ← parent = בדיקות
+   5.1 VISUAL CHECK            → inspection
+6. FINAL APPROVAL
+7. PACKAGING
+```
+**כלל מפתח**: `MASK / COVER / PROTECT` תחת FINISH = **הכנה לציפוי**
+(additional_processes) — לא בדיקה! ההקשר של הסעיף-הורה קובע.
+
+📜 **NOTE 2 / GENERAL INSTRUCTIONS / סעיף 10** — הוראות כלליות שחלות על כל השרטוט:
+דוגמאות:
+  - "ALL DIMENSIONS ARE FINAL AFTER FINISH"
+  - "ALL DIMENSIONS APPLY AFTER SURFACE TREATMENT"
+  - "DIMENSIONAL LIMITS APPLY AFTER SURFACE TREATMENT UNLESS OTHERWISE SPECIFIED"
+  - "THIS DRAWING SHALL BE USED WITH ITS MODEL FOR COMPLETE PRODUCT DEFINITION"
+  - "BREAK ALL SHARP EDGES"
+  - "ALL INSIDE RADII R0.3 MAX"
+  - "USE LATEST REVISION OF STANDARDS"
+אלו **אינן תהליכים** ואינן תהליך עיבוד/בדיקה — מקומן ב-`general_instructions`
+(שחולץ ב-stage_1) ולחלופין בשדה `notes` הכללי.
+**אסור** להכניס לשדות machining_processes / inspection_processes.
+סעיף 10 (GENERAL INSTRUCTIONS) לרוב נפתח את ה-PRC — אל תדלג עליו.
+
+🧩 **פיצול שלבים מורכבים — קריטי**:
+כאשר שלב **יחיד** בטקסט מכיל **שני תהליכים נפרדים** (למשל "BEFORE X AND Y AFTER X"),
+חובה לפצל ל-**שני entries נפרדים** עם אותו step_no + a/b suffix.
+
+דוגמה מ-BP38788A שלב 50.2 (טקסט מקורי):
+```
+CHROMATED ZINC-NICKEL PLATING, 8-15 µm THICK PER PS-111.21.
+PERFORM PROCEDURES FOR STRESS RELIEF BEFORE PLATING
+AND HYDROGEN RELIEF AFTER PLATING
+```
+זה **שלושה** תהליכים נפרדים:
+  1. coating_processes: {step_no:"50.2", type:"Zinc", name:"CHROMATED ZINC-NICKEL
+     PLATING, 8-15 µm THICK", thickness:"8-15 µm", standard:"PS-111.21"}
+  2. heat_treatment_processes: {step_no:"50.2a", name_en:"Stress Relief BEFORE
+     Plating", name_he:"טיפול שחרור מתחים לפני ציפוי", details:"PER PS-111.21"}
+  3. additional_processes: {step_no:"50.2b", name_en:"Hydrogen Embrittlement
+     Relief AFTER Plating", name_he:"שחרור מימן אחרי ציפוי", details:"PER PS-111.21"}
+
+⚠️ **אל תוותר על Stress Relief** — לפלדה 4340 HRC 40-43 זה קריטי!
+    אם השלב אומר "PERFORM PROCEDURES FOR X BEFORE [process]", חובה ליצור entry
+    ל-X — גם אם הוא בתוך משפט של ציפוי/תהליך אחר.
+
+📎 **RAFAEL — prefixes של תקנים פנימיים (לאימות OCR):**
+   • `PS-111.xx` / `PS 111.xx` — Rafael Process Spec (ציפוי/טיפול שטח)
+   • `PS-DOC<digits>` — Rafael Process Specification Document (נפוץ ב-WELDING)
+   • `SM-111.x` — Rafael Specification Material (חומר)
+   • `RAFDOCS-<digits>` — מסמך פנימי (לא תקן, אבל reference)
+   • `GEN.1111-<digits>` — General specification
+   ⚠️ אם ראית תקן כמו `sm111.2` באותיות קטנות — כמעט בוודאות שגיאת OCR.
+     הצורה הנכונה היא אות-גדולה (`PS-` או `SM-`). בנוסף, ודאי **אורך מלא** של
+     המספר: `PS-111.24` (4 ספרות אחרי הנקודה) שכיח יותר מ-`PS-111.2`.
+   ⚠️ אם OCR החזיר prefix לא מוכר (למשל `XK-111.x`) → **אל תחלץ** — זו טעות.
+   ⚠️ **"TO-" לא קיים כ-prefix של תקן RAFAEL!** אם ראית `TO-PS-DOC...` או
+     `TO-SM-111...` — זה OCR שקרא את הביטוי **"ACC. TO: <spec>"** כחלק
+     מהמספר. חלץ רק את [PS-DOC.../SM-...] בלי ה-TO-.
+     דוגמה:  "WELDING ACC. TO: PS-DOC0002945" → `PS-DOC0002945` (לא `TO-PS-DOC0002945`).
+
+═══════════════════════════════════════════════════════════════
+🔑 כללים ספציפיים קריטיים נוספים
+═══════════════════════════════════════════════════════════════
+
+🧱 **כלל MATERIAL — חומרי גלם אינם תהליך!**
+   סעיף MATERIAL (בד"כ 20.x, או שורת MATERIAL ב-Title Block) מפרט את **חומר
+   הגלם** של החלק. **אסור** להכניס שורות חומר ל-machining_processes!
+   דוגמאות לשורות MATERIAL (**אל תכניס אותן כ-processes**):
+     • "LOW CARBON STEEL SM T100-ANNEALED SEAMLESS RECT TUBE L=6000"
+     • "ALUMINUM ALLOY 6061-T651 PLATE"
+     • "STAINLESS STEEL 303 RND BAR DIA 30 MM"
+     • "PVC GRAY PLATE THK. 10"
+   כלל זיהוי: אם הטקסט כולל
+     [METAL/PLASTIC FAMILY] + [SPEC/GRADE] + [FORM: TUBE/BAR/PLATE/SHEET/ROD]
+     + [DIMENSION: L=/W=/T=/DIA/THK]
+   → זהו **material spec**, לא תהליך. מקומו בשדה `material` בשלב הבסיסי,
+     לא בטבלת תהליכים.
+
+🔥 **כלל WELDING — ריתוך הוא קטגוריה נפרדת**
+   ריתוך **אינו** עיבוד שבבי. גם אם השלב ממוספר 30.1 (שזה בד"כ "MACHINING"
+   בשרטוטים אחרים), אם התוכן הוא WELDING / AWS / WPS / GTAW → **welding_processes**.
+   בשרטוט WELD ASSEMBLY טיפוסי, `machining_processes` עשוי להיות ריק לגמרי —
+   זה תקין ונכון.
+
+✏️ **כלל ENGRAVING**
+   • "ENGRAVING ISO 3098" / "ENGRAVE 3.0MM CHARACTER" בלי הקשר של P/N →
+     **machining_processes** (חריטה על חלק מעובד).
+   • "ENGRAVE PART NUMBER" / "MARK PART NUMBER BY ENGRAVING" → **additional_processes**
+     תחת "Marking" (סימון).
+   הקריטריון: האם החריטה קשורה לזיהוי החלק (= marking) או לצורה הגיאומטרית
+   של משטח (= machining).
+
+   🔍 **חילוץ מלא של פרטי חריטה** — חובה לחלץ **כל** פרט שמופיע, ולארוז ב-details:
+     - **הטקסט שנחרט** (הטקסט המילולי בתוך מירכאות או על השרטוט):
+       למשל `CAUTION! HIGH PRESSURE`, `YYYY-MM-000`, `SERIAL No.`
+     - **תקן חריטה** (ISO 3098/1 Lettering B, FONT ARIAL)
+     - **גובה תווים** (HEIGHT = 5 mm / CHARACTER HEIGHT = 3.0 mm)
+     - **עומק** (DEPTH = 0.5 mm / 0.4 mm) — אם יש יותר מעומק אחד, ציין את שניהם
+       עם ההקשר (`CAUTION depth 0.5 mm | ID depth 0.4 mm`).
+     - **תזמון** (BEFORE SURFACE TREATMENT / AFTER SURFACE TREATMENT) — קריטי!
+     - **מיקום** (BACK SIDE / FRONT SIDE / ON MARKED AREA)
+     - **צבע** (RED / FED-STD-595) — אם קיים, זה גם painting_processes נפרד.
+   דוגמה מלאה של רשומה תקינה ב-additional_processes:
+     {"step_no": "70.1", "name_en": "Engraving",
+      "name_he": "חריטה",
+      "details": "Text: CAUTION! HIGH PRESSURE | Font: ISO 3098/1 Lettering B
+                   Arial | Height: 5 mm | Depth: 0.5 mm | Timing: BEFORE SURFACE
+                   TREATMENT | Position: Back side"}
+
+🔥 **כלל BAKING — שני סוגים**
+   • BAKING אחרי ציפוי (POST-PLATE BAKE, HYDROGEN EMBRITTLEMENT RELIEF,
+     "BAKING WITHIN 4 HRS AFTER PLATING") → **additional_processes** (תהליך-לוואי).
+   • HEAT TREAT עצמאי (AMS 2759, "HEAT TREAT TO 40-45 HRC") → **heat_treatment_processes**.
+
+═══════════════════════════════════════════════════════════════
+🗂️ שדות לחילוץ
+═══════════════════════════════════════════════════════════════
+
+1. machining_processes — עיבוד שבבי/יצור מכני (מערך):
    {
-     "step_no": "<מספר השלב כמו 20.1, 20.3.1>",
-     "name_en": "<שם באנגלית בדיוק כמו בשרטוט>",
+     "step_no": "<X.Y>",
+     "name_en": "<שם באנגלית>",
      "name_he": "<תרגום לעברית>",
-     "details": "<פרטים נוספים: מידות, סובלנויות, הערות>"
+     "details": "<מידות/סובלנויות/הערות>"
    }
-   כולל למשל:
-   - Engraving / חריטה (גובה תו, פונט, צבע)
-   - Drilling / קידוח
-   - Milling / כרסום
-   - Turning / חריטה
-   - Grinding / השחזה
-   - Threading / הברגה
-   - Deburring / הסרת גרדים
-   - "ALL DIMENSIONS AFTER SURFACE TREATMENT" וכד'.
-   ⚠️ אל תכלול כאן ציפויים/צביעה/אריזה/בדיקה — להם יש שדות נפרדים.
+   ⚠️ אל תכלול כאן: חומרי גלם, ריתוך, טיפול חום, NDT, ציפוי, צביעה, אריזה,
+     בדיקה, אפייה, התזת חול, התקנת אינסרטים, סימון.
 
-2. coating_processes — תהליכי ציפוי / פלטינג / טיפול שטח (מערך):
-   כל פריט:
+2. welding_processes — ריתוך/הלחמה (מערך):
    {
-     "step_no": "<מספר השלב, למשל 30.1>",
-     "type": "<קטגוריה באנגלית קצרה>",
-     "type_he": "<אותה קטגוריה בעברית>",
-     "name": "<תיאור מלא כפי שכתוב>",
-     "thickness": "",
-     "standard": "<תקן מלא כולל CLASS / TYPE / GRADE>",
+     "step_no": "<X.Y>",
+     "name_en": "<שם באנגלית>",
+     "name_he": "<תרגום לעברית>",
+     "details": "<WPS/filler/electrode/AWS spec/penetration/tolerances>"
+   }
+   כולל: GTAW/TIG, GMAW/MIG, FCAW, SMAW, SAW, BRAZING, SOLDERING,
+          "INSPECTION 48hr AFTER WELD" הוא NDT/inspection — לא welding.
+
+3. heat_treatment_processes — טיפול חום (מערך):
+   {
+     "step_no": "<X.Y>",
+     "name_en": "<שם באנגלית>",
+     "name_he": "<תרגום לעברית>",
+     "details": "<טמפרטורה/זמן/קשיות הנדרשת/תקן>"
+   }
+   כולל: ANNEAL, NORMALIZE, TEMPER, HARDEN, STRESS RELIEVE, SOLUTION TREAT,
+         AGE, QUENCH, AMS 2759, "HEAT TREAT TO 40-45 HRC".
+   ⚠️ BAKING אחרי ציפוי → additional_processes (לא כאן).
+
+4. coating_processes — ציפוי/פלטינג (מערך):
+   {
+     "step_no": "<X.Y>",
+     "type": "<קטגוריה אנגלית>",
+     "type_he": "<עברית>",
+     "name": "<תיאור מלא>",
+     "thickness": "<עובי>",
+     "standard": "<תקן מלא>",
      "rohs": true/false
    }
-   קטגוריות אפשריות (type / type_he): "Conversion / המרה כימית", "Anodize / אנודייז",
-   "Hard Anodize / אנודייז קשה", "Passivation / פסיבציה",
-   "Electroless Nickel / ניקל אלקטרולס", "Nickel / ניקל", "Zinc / אבץ",
-   "Cadmium / קדמיום", "Chrome / כרום", "Hard Chrome / כרום קשה",
-   "Tin / בדיל", "Silver / כסף", "Gold / זהב", "Copper / נחושת",
-   "Black Oxide / תחמוצת שחורה", "Phosphate / פוספט",
-   "Dry Film Lubricant / שימון יבש".
-   ⚠️ rohs=true רק אם מופיע במפורש "RoHS" ליד התהליך.
+   🏷️ קטגוריות: "Conversion"/"המרה כימית", "Anodize"/"אנודייז",
+     "Hard Anodize"/"אנודייז קשה", "Passivation"/"פסיבציה",
+     "Electroless Nickel"/"ניקל אלקטרולס", "Nickel"/"ניקל",
+     "Zinc"/"אבץ", "Cadmium"/"קדמיום", "Chrome"/"כרום",
+     "Hard Chrome"/"כרום קשה", "Tin"/"בדיל", "Silver"/"כסף",
+     "Gold"/"זהב", "Copper"/"נחושת", "Black Oxide"/"תחמוצת שחורה",
+     "Phosphate"/"פוספט", "Dry Film Lubricant"/"שימון יבש".
+   🧭 מדריך תקן → סוג:
+     ASTM B633 → Zinc (FE/ZN = Zinc, לא Conversion!)
+     ASTM B733 → Electroless Nickel
+     MIL-DTL-5541 / MIL-C-5541 → Conversion
+     MIL-A-8625 → Anodize (Type II/III)
+     MIL-C-26074 / AMS-C-26074 → Electroless Nickel
+     QQ-N-290 / AMS-QQ-N-290 → Nickel
+     QQ-P-416 → Cadmium
+     QQ-Z-325 → Zinc
+     ASTM A967 / QQ-P-35 → Passivation
+   🎯 שכבות משולבות (X OVER Y): החזר **שני** פריטים עם אותו step_no וה-standard
+     המשותף. למשל "SILVER OVER ELECTROLESS NICKEL PER PS-111.21" → 2 פריטים.
+   ⚠️ rohs=true רק אם "RoHS" מופיע במפורש.
+   🚫 אסור להמציא תקן. רק מה שכתוב.
 
-3. painting_processes — תהליכי צביעה (מערך):
-   כל פריט:
-    {
-     "step_no": "<למשל 40.1>",
-     "type": "",
-     "type_he": "",
-     "name": "<שם מלא + צבע / RAL / FED-STD>",
-     "thickness": "",
-     "standard": "",
-     "rohs": false
-   }
+5. painting_processes — צביעה (מערך): אותה סכמה כמו coating.
+   🏷️ קטגוריות: "Epoxy Primer"/"פריימר אפוקסי", "Polyurethane Topcoat"/
+     "צבע עליון פוליאוריתן", "Acrylic Paint"/"צבע אקרילי",
+     "Enamel"/"אמייל", "Powder Coating"/"ציפוי אבקה".
 
-4. inspection_processes — תהליכי בדיקה (מערך):
+6. ndt_processes — בדיקות אל-הרסיות (מערך):
    {
-     "step_no": "<למשל 50.1>",
+     "step_no": "<X.Y>",
+     "name_en": "<למשל 'Magnetic Particle Inspection per ASTM E1444'>",
+     "name_he": "<בדיקת חלקיקים מגנטיים לפי ASTM E1444>",
+     "details": "<acceptance criteria / הספקה>"
+   }
+   כולל: PT (Penetrant), MT (Magnetic Particle), UT (Ultrasonic), RT
+         (Radiograph), ET (Eddy Current), LEAK TEST.
+
+7. inspection_processes — בדיקה/אימות (מערך):
+   {
+     "step_no": "<X.Y>",
      "name_en": "",
      "name_he": "",
      "details": ""
    }
-   כולל: Visual Inspection, Sampling Inspection, Inspection Report, Dimensional וכו'.
+   כולל: VISUAL INSPECTION, DIMENSIONAL, SAMPLING, VERIFY SURFACE PLATING
+         THICKNESS, NO BURRS AT X20 MICROSCOPIC, 100% INSPECTION, FAI.
+   ⚠️ **שים לב**: ריתוך שמצריך בדיקה אחרי 48 שעות → ה-**בדיקה** כאן;
+     ה-**ריתוך עצמו** ב-welding_processes.
+   ⚠️ **חובה לשמר את הקידומת "100%"** אם מופיעה בטקסט המקורי:
+     ❌ "VISUAL INSPECTION FOR THE ENTIRE LOT"  (חסר 100%)
+     ✅ "100% VISUAL INSPECTION FOR THE ENTIRE LOT"
+     ההבדל בין בדיקת 100% לבדיקת דגימה הוא מהותי בבקרת איכות.
+   📎 **שיטות דגימה נפוצות — תיקוני OCR**:
+     ב-RAFAEL שיטת הדגימה הנפוצה היא **Z0 SQUEGLIA** (בפעם הראשונה - אפס).
+     וריאציות OCR שגויות שחובה לתקן:
+       "ZQ SQUEGLIA" / "ZO SQUEGLIA" → `Z0 SQUEGLIA`
+       "ZQSQLAND NQE" / "SQSQLAND" → `Z0 SQUEGLIA INDEX`
+       "SUGELIA" / "SUQEILA" / "SQUEGLA" → `SQUEGLIA`
+     אם רואים את אחד הווריאציות → החזר `Z0 SQUEGLIA` ואת ה-INDEX VALUE
+     (למשל `2.5%`) כפי שכתוב.
 
-5. final_approval — תהליכי אישור סופי (מערך):
+8. final_approval — אישור סופי (מערך):
    {"step_no": "", "name_en": "", "name_he": "", "details": ""}
-   כולל: Verification of Documents, Serviceability Tag.
+   🔴 **חובה — שני שלבים מופיעים כמעט תמיד בסעיף FINAL APPROVAL בשרטוטי PRC של RAFAEL:**
+      א. VISUAL INSPECTION & VERIFICATION OF DOCUMENTS
+      ב. SERVICEABILITY TAG
+   אל תעצור אחרי השלב הראשון! אם ראית את "VISUAL INSPECTION"/"VERIFICATION"
+   וגם שלב נוסף בשם "SERVICEABILITY TAG" / "מדבקת תקינות" — שניהם חייבים
+   להופיע ב-final_approval כ-**שני entries נפרדים** (למשל step_no "60.1" ו-"60.2",
+   או "70.1" ו-"70.2").
+   דוגמה:
+     [{"step_no": "60.1", "name_en": "Visual Inspection & Verification of Documents",
+       "name_he": "בדיקה ויזואלית ואימות מסמכים", "details": ""},
+      {"step_no": "60.2", "name_en": "Serviceability Tag",
+       "name_he": "תיוג תקינות", "details": ""}]
 
-6. additional_processes — תהליכים מלווים שלא נכנסים למעלה:
-   {"name_en": "", "name_he": ""}
-   כולל: Heat Treatment, Sand Blasting, Masking, Demasking, Marking, Tag & Bag,
-   Hydrogen Degassing, Insert Installation וכו'.
-   ⚠️ סימון (MARKING): העתק את מספר הפריט לסימון בדיוק כפי שכתוב בשרטוט,
-   גם אם הוא שונה מה-P/N של השרטוט עצמו.
+9. additional_processes — תהליכי סימון / הכנה / תהליך-לוואי (מערך):
+   {
+     "step_no": "<X.Y אם קיים>",
+     "name_en": "<שם באנגלית>",
+     "name_he": "<שם בעברית>",
+     "details": "<הקשר/תקן/טמפרטורה/זמן>"
+   }
+   כולל:
+   - **סימון** (MARK PART NUMBER, MARKING — LASER/ENGRAVING/STAMP/SILK SCREEN/
+     INK JET, LOT NUMBER). חובה לפרט את **שיטת הסימון**:
+     • "METHOD: LASER" → name_en="Marking — Laser"
+     • "MARK PART NUMBER BY ENGRAVING" → name_en="Marking — Engraving"
+     • "INK STAMP" → name_en="Marking — Stamp"
+   - **Baking אחרי ציפוי / Hydrogen Embrittlement Relief** (כולל טמפ' וזמן).
+   - **Masking / Demasking / MOUNT PART / רקינג**.
+   - **התזה אברסיבית pre-treatment** (Sand Blast, Shot Peening, Glass Bead).
+   - **התקנת אינסרטים / Helicoil / Corrosion Inhibitor** (כולל תקן ב-details).
+   - Tag & Bag, Hydrogen Degassing.
+   ⚠️ אם יש תקן (למשל "ACC. TO PS-111.29") → הכנס ב-details וגם ל-standards.
 
-7. packaging_notes — אריזה (אובייקט):
-   {"step_no": "", "en": "", "he": ""}
+10. packaging_notes — אריזה (אובייקט):
+    {"step_no": "<X.Y>", "en": "<מלא>", "he": "<מלא>"}
+    חובה לפרט: סוג שקית (SHIELD BAG/VCI/ESD), סדרה (1000 SERIES),
+    אריזה אינדיווידואלית, מניעת קורוזיה, דרישות תיוג.
+    🔴 **חובה לחלץ את סעיף PACKING — אסור לדלג!**
+    בשרטוטי PRC טיפוסיים, PACKING הוא **הסעיף האחרון** — יכול להופיע כ-70.x,
+    80.x, 90.x, 100.x, או תחת כותרת `PACKING` / `PACKING AND SHIPMENT` / `אריזה`.
+    אל תפסיק לחלץ רק כי כבר מצאת machining / coating / inspection — המשך עד סוף הטבלה.
+    🏷️ **הבחנה בין 'לא קיים' ל-'לא חולץ'**:
+      • אם ה-PACKING **לא קיים** בשרטוט כלל (נפוץ בשרטוטי לקוחות קטנים כמו
+        Mechanico-Shaftech) — החזר במפורש:
+        {"step_no": "", "en": "[NO_PACKING_REQUIREMENT_IN_DRAWING]",
+         "he": "[NO_PACKING_REQUIREMENT_IN_DRAWING]"}
+        זה מאותת לנו שאתה בדקת ולא מצאת, לא שדילגת.
+      • אם דילגת על הסעיף → פשוט החזר ריק "" "". זה מסומן כחסר.
 
-8. standards — רשימה שטוחה של כל התקנים שמופיעים בשרטוט (מערך מחרוזות, ללא כפילויות):
-   "MIL-A-8625 Type II Class 1", "AMS-C-26074D Class 4 Grade A", "ISO 3098/1",
-   "FED-STD-595", "ASTM B545-13 Class C+", וכו'.
-9. notes — הערות כלליות (מחרוזת אחת).
+11. standards — רשימה שטוחה של **כל** התקנים (מערך, ללא כפילויות):
+    דוגמאות: "MIL-A-8625 Type II Class 1", "AMS-C-26074D Class 4 Grade A",
+             "PS-111.21", "PS-111.29", "RAFDOCS-434847", "ASTM B209",
+             "AWS D1.1", "ISO 3834", "AMS 2759", "ASTM E1444",
+             "ASME Y14.5-2009", "ASME Y14.41", "ISO 1302".
 
-החזר JSON בלבד:
+    🚫 **איסור Hallucination — קריטי:**
+    חלץ **אך ורק** תקנים שמופיעים **verbatim** (מילולית) בטקסט השרטוט.
+    **אסור** להוסיף תקנים מהידע הכללי שלך, גם אם הם "נראים הגיוניים" לסוג הפריט,
+    לחומר, או לתהליך.
+    ❌ שגיאה נפוצה: הוספת "MIL-STD-130" רק כי זה תקן נפוץ לסימון חלקים.
+    ❌ שגיאה נפוצה: הוספת "MIL-STD-145-A-2009" / "MIL-APPD VOL.2" כי הם
+       קשורים לתחום אבל לא כתובים במפורש.
+    ✅ אם אתה לא **100% בטוח** שהתקן מופיע בשרטוט — **אל תכלול** אותו.
+
+    📚 **מקורות לגיטימיים לתקנים** (חלץ **אך ורק** מכאן):
+       1. Title Block (SURFACE FINISH, GENERAL TOLERANCES, MATERIAL SPEC)
+       2. NOTES section (גם NOTES ממוספר היררכי כמו 3.1, 4.1)
+       3. **"UNLESS OTHERWISE SPECIFIED" / "UOS" block** — לרוב מכיל
+          ASME Y14.5, ASME Y14.41, ISO 1302 (surface finish), general tolerances.
+          **בשרטוטי Elbit Systems** ה-UOS מכיל גם תקנים נוספים בטקסט קטן:
+            - `ASME Y14.6aM OR Y14.6` (SCREW THREADS)
+            - `ASME Y14.38` (ABBREVIATIONS)
+            - `ASME Y14.41` (DIGITAL PRODUCT DEFINITION)
+          ⚠️ OCR שגיאות נפוצות: `ASME Y14.6aM` מתפרש בטעות כ-`SHEET 1S3.4`;
+             `SCREW THREADS` כ-`SCALE THREADS`; `ABBREVIATIONS` כ-`REVISION`.
+             אם ראית `SHEET 1S3.4` ליד SCREW THREADS → התקן הנכון הוא **ASME Y14.6aM**.
+       4. BOM / Parts List (עמודת SPEC. / STD / MATERIAL SPEC)
+       5. שדות ציפוי/צביעה/אריזה (PER XXX, ACC. TO YYY)
+       6. PRODUCTION ROUTING CHART (כל הסעיפים)
+
+    ⚠️ **הטמעה**: תקן שמופיע **בתוך תיאור שלב** (למשל "PER PS-111.21",
+       "ACC. TO AWS D1.1", "(RAFDOCS-434847)") — חובה להופיע **גם** ברשימה זו.
+    ⚠️ סרוק גם את סעיף MATERIAL: תקני חומר (ASTM B209, GEN.1111-1, ASTM A513)
+       חייבים להופיע ברשימה.
+
+12. notes — הערות כלליות (מחרוזת אחת).
+
+⛔ **איסורים גורפים:**
+   • אל תמציא תקנים, עוביים, גוונים, Class/Type/Grade.
+   • אל תכניס שורות MATERIAL (חומר גלם) כ-processes.
+   • אל תסווג WELDING כעיבוד שבבי.
+   • אל תסווג HEAT TREAT כעיבוד שבבי.
+   • אל תסווג NDT (PT/MT/UT/RT) כ-inspection רגיל.
+   • בשרטוט WELD ASSEMBLY — machining_processes ריק זה תקין.
+
+החזר JSON בלבד (ללא טקסט נוסף):
 {
   "machining_processes": [],
+  "welding_processes": [],
+  "heat_treatment_processes": [],
   "coating_processes": [],
   "painting_processes": [],
+  "ndt_processes": [],
   "inspection_processes": [],
   "final_approval": [],
   "additional_processes": [],

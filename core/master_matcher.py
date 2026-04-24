@@ -13,15 +13,36 @@ Masters matcher — מציאת התאמת מאסטרים לציפויי השרט
 from __future__ import annotations
 
 import logging
+import os
 import re
 from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
-MASTERS_PATH = Path(__file__).resolve().parent.parent / "Masters.xlsx"
+load_dotenv()
+
+# קריאה ממשתנה סביבה עם fallback לנתיב ברירת המחדל
+def _get_masters_path() -> Path:
+    """מחזיר את נתיב ה-Masters.xlsx הנוכחי (מ-runtime או מ-.env)."""
+    try:
+        from core.azure_client import get_masters_xlsx_path
+        custom_path = get_masters_xlsx_path()
+        if custom_path:
+            return Path(custom_path).resolve()
+    except (ImportError, Exception):
+        pass
+    
+    env_path = os.getenv("MASTERS_XLSX_PATH", "").strip()
+    if env_path:
+        return Path(env_path).resolve()
+    
+    return Path(__file__).resolve().parent.parent / "Masters.xlsx"
+
+MASTERS_PATH = _get_masters_path()
 
 
 # ─── ציון התאמה ───
@@ -71,16 +92,17 @@ _COLOR_KEYWORDS = {
 @lru_cache(maxsize=1)
 def load_masters() -> pd.DataFrame:
     """טעינת קובץ המאסטרים פעם אחת ושמירה ב-cache."""
-    if not MASTERS_PATH.exists():
-        logger.warning("Masters.xlsx not found at %s", MASTERS_PATH)
+    masters_path = _get_masters_path()
+    if not masters_path.exists():
+        logger.warning("Masters.xlsx not found at %s", masters_path)
         return pd.DataFrame(
             columns=["master_id", "desc", "standard", "thickness", "color", "col5", "rohs", "full_name"]
         )
-    df = pd.read_excel(MASTERS_PATH)
+    df = pd.read_excel(masters_path)
     df.columns = ["master_id", "desc", "standard", "thickness", "color", "col5", "rohs", "full_name"]
     for c in df.columns:
         df[c] = df[c].astype(str).fillna("").replace({"nan": "", "None": ""})
-    logger.info("Loaded %d masters from %s", len(df), MASTERS_PATH)
+    logger.info("Loaded %d masters from %s", len(df), masters_path)
     return df
 
 

@@ -183,7 +183,10 @@ _KNOWN_PACKING_TEMPLATES = [
 def validate_packing_note(packaging_notes: dict | str) -> dict | None:
     """
     בודק האם הוראת האריזה נראית סבירה (דומה לתבניות ידועות).
-    מחזיר אזהרה אם הטקסט חשוד (similarity נמוך מאוד = הזיה).
+    מחזיר אזהרה אם:
+      • ריק — לא ברור אם לא קיים או לא חולץ (MISSING_PACKING).
+      • `[NO_PACKING_REQUIREMENT_IN_DRAWING]` — סמן מפורש שאין דרישה (INFO).
+      • טקסט לא דומה לתבניות ידועות — similarity נמוך = חשד להזיה.
     """
     if isinstance(packaging_notes, dict):
         text = packaging_notes.get("en", "") or packaging_notes.get("he", "")
@@ -191,10 +194,32 @@ def validate_packing_note(packaging_notes: dict | str) -> dict | None:
         text = str(packaging_notes or "")
 
     text = text.strip()
-    if not text or len(text) < 10:
-        return None  # ריק — אין מה לבדוק
-
     text_upper = text.upper()
+
+    # 1. סמן מפורש "לא קיים בשרטוט" — INFO, לא אזהרה חשודה
+    if "NO_PACKING_REQUIREMENT" in text_upper:
+        return {
+            "type": "NO_PACKING_REQUIREMENT_IN_DRAWING",
+            "severity": "INFO",
+            "source": "packaging_notes",
+            "value": text[:80] or "(empty)",
+            "message": "השרטוט אינו כולל דרישת אריזה — המודל סימן זאת במפורש.",
+        }
+
+    # 2. ריק לחלוטין — לא ברור אם 'לא קיים' או 'המודל דילג'
+    if not text or len(text) < 10:
+        return {
+            "type": "MISSING_PACKING",
+            "severity": "MEDIUM",
+            "source": "packaging_notes",
+            "value": "(empty)",
+            "message": (
+                "שדה packaging_notes ריק — לא ברור אם אין דרישת אריזה או "
+                "שהמודל דילג. בדוק ידנית בשרטוט; אם אין דרישה — הערך הנכון "
+                "הוא '[NO_PACKING_REQUIREMENT_IN_DRAWING]'."
+            ),
+        }
+
 
     # בדיקה מהירה — מכיל מילת מפתח מוכרת?
     for tmpl in _KNOWN_PACKING_TEMPLATES:
@@ -222,6 +247,152 @@ def validate_packing_note(packaging_notes: dict | str) -> dict | None:
     return None
 
 
+# ─── Missing categories: Pickling / Hydrogen Embrittlement ───────────────────
+# תהליכים שהמודל פוספם לעיתים קרובות — מילות מפתח ב-NOTES שמחייבות entry
+# ב-additional_processes. אם המילה בטקסט אבל אין entry תואם → אזהרה.
+
+_SURFACE_PREP_KEYWORDS = re.compile(
+    r"\b(PICKLING|PICKLE|NITRIC\s*ACID|HYDROFLUORIC|HNO3|\bHF\b|"
+    r"REMOVE\s+TINT|TINT\s+REMOVAL|GLASS\s+BEAD\s+BLAST|"
+    r"ALKALINE\s+CLEAN|DEGREASE|ETCHING)\b",
+    re.IGNORECASE,
+)
+
+_POST_PROCESS_KEYWORDS = re.compile(
+    r"\b(HYDROGEN\s+EMBRITTLEMENT|EMBRITTLEMENT\s+RELIEF|"
+    r"HYDROGEN\s+DEGASSING|DEHYDROGENATION|STRESS\s+RELIEF(?:\s+BAKE)?|"
+    r"POST[-\s]?PLATE\s+BAKE|BAKING\s+AFTER\s+PLAT)",
+    re.IGNORECASE,
+)
+
+
+def _collect_additional_text(report_json: dict) -> str:
+    """מאחד את כל הטקסטים של additional_processes למחרוזת אחת לחיפוש."""
+    parts: list[str] = []
+    for p in report_json.get("additional_processes", []) or []:
+        if isinstance(p, dict):
+            parts.append(str(p.get("name_en", "")))
+            parts.append(str(p.get("name_he", "")))
+            parts.append(str(p.get("details", "")))
+        else:
+            parts.append(str(p or ""))
+    return " | ".join(parts).upper()
+
+
+def validate_surface_prep_and_post_process(report_json: dict) -> list[dict]:
+    """
+    מזהה שמילות מפתח של 'הכנת שטח' / post-process הופיעו ב-NOTES אבל לא
+    נחלצו ל-additional_processes. זה סימן שהמודל פספם.
+    """
+    warnings: list[dict] = []
+    notes_text = str(report_json.get("notes", "") or "")
+    additional_text = _collect_additional_text(report_json)
+
+    # Pickling / surface preparation
+    if _SURFACE_PREP_KEYWORDS.search(notes_text):
+        if not _SURFACE_PREP_KEYWORDS.search(additional_text):
+            warnings.append({
+                "type": "MISSING_SURFACE_PREP",
+                "severity": "HIGH",
+                "source": "additional_processes",
+                "value": "Pickling / surface preparation",
+                "message": (
+                    "מילת מפתח של הכנת שטח (PICKLING / HF / NITRIC ACID / "
+                    "REMOVE TINT / GLASS BEAD BLAST) מופיעה ב-NOTES אבל לא "
+                    "חולצה ל-additional_processes. ייתכן שהמודל דילג — "
+                    "בדוק את NOTES של השרטוט."
+                ),
+            })
+
+    # Hydrogen Embrittlement / post-plate treatments
+    if _POST_PROCESS_KEYWORDS.search(notes_text):
+        if not _POST_PROCESS_KEYWORDS.search(additional_text):
+            warnings.append({
+                "type": "MISSING_POST_PROCESS",
+                "severity": "HIGH",
+                "source": "additional_processes",
+                "value": "Hydrogen Embrittlement / post-plate treatment",
+                "message": (
+                    "HYDROGEN EMBRITTLEMENT / STRESS RELIEF / BAKING מופיע "
+                    "ב-NOTES אבל לא חולץ ל-additional_processes. תהליכים "
+                    "אלה קריטיים לאיכות החלק — בדוק ידנית."
+                ),
+            })
+
+    return warnings
+
+
+# ─── Standards hallucination (unknown issuing body) ───────────────────────────
+
+# גופי תקינה/סדרות ידועות. כל תקן שלא מתחיל באחת התבניות האלה — חשוד.
+# שמור על רשימה שמרנית: עדיף false-negative נדיר מאשר המון false-positive רועשים.
+_KNOWN_STANDARD_PATTERNS = [
+    re.compile(r"^MIL[\s\-]", re.IGNORECASE),          # MIL-DTL-5541, MIL-STD-130
+    re.compile(r"^AMS[\s\-]?[A-Z0-9]", re.IGNORECASE), # AMS 2700, AMS-C-26074
+    re.compile(r"^ASTM[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^ASME[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^QQ[\s\-]", re.IGNORECASE),           # QQ-P-416, QQ-Z-325
+    re.compile(r"^FED[\s\-]?STD", re.IGNORECASE),
+    re.compile(r"^PS[\s\-]?\d", re.IGNORECASE),        # customer Part Spec
+    re.compile(r"^RAFDOCS", re.IGNORECASE),
+    re.compile(r"^TILDOCS", re.IGNORECASE),
+    re.compile(r"^AWS[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^ANSI[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^ISO[\s\-]?\d", re.IGNORECASE),
+    re.compile(r"^EN[\s\-]?\d", re.IGNORECASE),
+    re.compile(r"^DIN[\s\-]?\d", re.IGNORECASE),
+    re.compile(r"^BS[\s\-]?(EN[\s\-]?)?\d", re.IGNORECASE),
+    re.compile(r"^SAE[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^NAS[MT]?[\s\-]?\d", re.IGNORECASE),   # NAS, NASM, NAST
+    re.compile(r"^IPC[\s\-]?[A-Z0-9]", re.IGNORECASE),
+    re.compile(r"^JEDEC", re.IGNORECASE),
+    re.compile(r"^UL[\s\-]?\d", re.IGNORECASE),
+    re.compile(r"^CSA[\s\-]", re.IGNORECASE),
+    re.compile(r"^MS[\s\-]?\d{4,}", re.IGNORECASE),     # Military drawing (MS33540)
+    re.compile(r"^AN[\s\-]?\d{3,}", re.IGNORECASE),     # Army-Navy standard
+    re.compile(r"^NASA[\s\-]", re.IGNORECASE),
+    re.compile(r"^DO[\s\-]?\d{3,}", re.IGNORECASE),     # RTCA DO-xxx
+    re.compile(r"^FAR[\s\-]?\d", re.IGNORECASE),
+    re.compile(r"^RTCA[\s\-]", re.IGNORECASE),
+    re.compile(r"^JIS[\s\-]?[A-Z0-9]", re.IGNORECASE),  # Japan
+    re.compile(r"^GB[\s\-]?\d", re.IGNORECASE),         # China
+    re.compile(r"^BOEING", re.IGNORECASE),
+    re.compile(r"^BAC[\s\-]?\d", re.IGNORECASE),        # Boeing Aircraft Company
+    re.compile(r"^AIRBUS", re.IGNORECASE),
+    re.compile(r"^ABS[\s\-]?\d", re.IGNORECASE),        # Airbus / American Bureau of Shipping
+    re.compile(r"^SSPC[\s\-]", re.IGNORECASE),          # Society for Protective Coatings
+    re.compile(r"^NACE[\s\-]", re.IGNORECASE),          # Corrosion engineers
+    re.compile(r"^EN[\s\-]?ISO[\s\-]?\d", re.IGNORECASE),  # EN ISO xxxx (composite)
+    re.compile(r"^BS[\s\-]?EN[\s\-]?ISO[\s\-]?\d", re.IGNORECASE),
+]
+
+
+def validate_standards(report_json: dict) -> list[dict]:
+    """
+    מסמן תקנים עם קידומת גוף-תקינה לא מוכרת — מצב הזיה נפוץ.
+    דוגמה נתפסת: 'AWI-STD-1916' (הגוף 'AWI' לא קיים).
+    """
+    warnings: list[dict] = []
+    for std in report_json.get("standards", []) or []:
+        std_text = str(std or "").strip()
+        if not std_text:
+            continue
+        if any(pat.match(std_text) for pat in _KNOWN_STANDARD_PATTERNS):
+            continue
+        warnings.append({
+            "type": "SUSPICIOUS_STANDARD",
+            "severity": "HIGH",
+            "source": "standards",
+            "value": std_text,
+            "message": (
+                f"התקן '{std_text}' אינו תואם גוף תקינה מוכר "
+                "(MIL/AMS/ASTM/ASME/AWS/ISO/EN/DIN/BS/SAE/NAS/ANSI/IPC/UL/...) — "
+                "חשד להזיה של המודל."
+            ),
+        })
+    return warnings
+
+
 # ─── Combined validator ───────────────────────────────────────────────────────
 
 def run_all_validators(report_json: dict) -> list[dict]:
@@ -234,6 +405,8 @@ def run_all_validators(report_json: dict) -> list[dict]:
     warnings.extend(validate_coating_classification(
         report_json.get("coating_processes", [])
     ))
+    warnings.extend(validate_standards(report_json))
+    warnings.extend(validate_surface_prep_and_post_process(report_json))
     packing_warning = validate_packing_note(
         report_json.get("packaging_notes", {})
     )

@@ -1,4 +1,4 @@
-# 📝 CHANGELOG — DrawingAI Lite
+# 📝 CHANGELOG — AIDrawAnalyser
 
 > כל השינויים המהותיים בפרויקט. הפורמט מבוסס על
 > [Keep a Changelog](https://keepachangelog.com/he/), הגרסאות לפי

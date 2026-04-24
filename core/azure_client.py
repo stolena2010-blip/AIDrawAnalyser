@@ -41,7 +41,8 @@ def _load_runtime_settings() -> dict:
 
 def save_runtime_settings(active_model: str | None = None,
                            fallback_enabled: bool | None = None,
-                           enabled_modes: list[str] | tuple[str, ...] | None = None) -> None:
+                           enabled_modes: list[str] | tuple[str, ...] | None = None,
+                           masters_xlsx_path: str | None = None) -> None:
     """שומר העדפות מודל בקובץ runtime (לא נוגע ב-.env)."""
     cur = _load_runtime_settings()
     if active_model is not None:
@@ -54,6 +55,14 @@ def save_runtime_settings(active_model: str | None = None,
         if not normalized:
             normalized = ["single", "assembly"]
         cur["enabled_modes"] = normalized
+    if masters_xlsx_path is not None:
+        cleaned_path = masters_xlsx_path.strip() if isinstance(masters_xlsx_path, str) else ""
+        cur["masters_xlsx_path"] = cleaned_path
+        # עדכן גם את משתנה הסביבה הנוכחי כדי שהוא יהיה זמין מיד
+        if cleaned_path:
+            os.environ["MASTERS_XLSX_PATH"] = cleaned_path
+        elif "MASTERS_XLSX_PATH" in os.environ:
+            del os.environ["MASTERS_XLSX_PATH"]
     _RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
     _RUNTIME_FILE.write_text(
         json.dumps(cur, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -94,6 +103,20 @@ def enabled_modes() -> list[str]:
             return modes
 
     return ["single", "assembly"]
+
+
+def get_masters_xlsx_path() -> str:
+    """מחזיר נתיב ל-Masters.xlsx (מ-runtime או מ-.env)."""
+    rt = _load_runtime_settings()
+    if rt.get("masters_xlsx_path"):
+        return str(rt["masters_xlsx_path"]).strip()
+    
+    env_val = os.getenv("MASTERS_XLSX_PATH", "").strip()
+    if env_val:
+        return env_val
+    
+    # ברירת מחדל
+    return ""
 
 
 # ─── זיהוי סוג המודל ───

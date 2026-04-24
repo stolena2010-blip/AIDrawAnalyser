@@ -20,24 +20,117 @@
    אם אין שדה כזה → החזר "".
 
 2. revision — גרסה / REV / Rev. / REVISION
+   🔑 **סדר חיפוש**:
+     1. SIZE REV box ב-Title Block (הראשי).
+     2. טבלת REVISIONS — הערך **האחרון** הוא הגרסה הנוכחית.
+     3. שם הקובץ (אם מכיל "RevX" / "_X_").
+   ⚠️ אל תחזיר "" אם יש טבלת REVISIONS — הערך האחרון בה הוא התשובה.
 
 3. drawing_number — מספר שרטוט / DWG NO / Drawing No. / DRAWING NUMBER
    ⚠️ אסור לבלבל עם CAGE CODE / ASSEMBLY / CATALOG NO.
    ✅ דוגמאות תקפות: "DD6875I2-03", "22-2288-0101-00", "8H-A53274", "236668-4"
    חלץ רק מהתא שמסומן DWG NO / DRAWING NO. / DRAWING NUMBER.
+   ⚠️ **inference**: אם אין שדה DWG נפרד בשרטוט (מקובל בלקוחות קטנים
+      כגון Mechanico-Shaftech) → הנח ש-drawing_number = part_number.
+      לעולם אל תחזיר "" אם יש P/N.
 
 4. customer — שם לקוח / Customer / Client / Company (חפש לוגו או שם חברה ב-Title Block).
 
 5. material — חומר גלם / Material / MAT'L / MAT / Raw Material / חומר.
    ⚠️ ציין במפורש את סוג החומר אם רשום: אלומיניום, פלדה, נחושת, נירוסטה, פליז, טיטניום וכו'.
    העתק בדיוק כפי שכתוב, למשל: "AL 7075-T6", "STEEL 4140", "STAINLESS 316",
-   "ALUMINUM ALLOY 6061-T651", "TI-6AL-4V", "ALUMINIUM ALLOY 5083 H111".
-   חפש בכמה מקומות (לפי הסדר):
-     א) ב-Title Block בשדה MATERIAL / MAT'L / SPEC.
-     ב) ב-NOTES — בשורה שמתחילה ב-"MATERIAL ..." או "MATERIAL:"
+   "ALUMINUM ALLOY 6061-T651 PLATE, AMS 4027", "TI-6AL-4V",
+   "ALUMINIUM ALLOY 5083 H111".
+   🔑 **סדר עדיפויות** — אם אותו שדה מופיע בכמה מקומות:
+     1. **Production Routing Chart — סעיף 10 (MATERIAL)** — עדיפות עליונה.
+     2. Title Block (שדה MATERIAL / MAT'L / SPEC).
+     3. NOTES — בשורה שמתחילה ב-"MATERIAL ..." או "MATERIAL:"
         (למשל "4. MATERIAL ALUMINIUM ALLOY 5083 H111").
-     ג) ב-SPECIFICATION / MATERIAL SPEC.
+     4. SPECIFICATION / MATERIAL SPEC.
+   ⚠️ אם PRC וה-Title Block סותרים (למשל Title Block = `AMS-QQ-A-250/4` אבל
+     סעיף 10 ב-PRC = `AMS 4027`) — **חובה** להעדיף את ה-PRC.
+   ⚠️ **אל תסיק מ"זיכרון"** — אם בשרטוט כתוב `AMS 4027`, אל תכתוב `AMS-QQ-A-250/4`
+     רק כי ראית את זה בשרטוטים דומים קודמים.
+   ⚠️ תקני `QQ-` (Federal Spec) הם בד"כ **ישנים**. רוב תקני ה-QQ הוחלפו ב-AMS/ASTM.
+     אם ראית `QQ-` — ודאי שזה אכן כתוב בשרטוט הנוכחי.
    אם אין — "".
+
+6. catalog_number — מספר קטלוג פנימי (CAT NO. / CATALOG NO.) — **לא** part_number!
+   ברפאל זה מספר ספרות עצמאי (למשל "5070280944"). אם אין → "".
+
+7. raw_weight — משקל חומר גלם מסעיף MATERIAL:
+   {"qty": "<מספר>", "unit": "<KG/G/LB>"}
+   מקור: שורת MATERIAL ב-PRC (למשל `QTY: 0.035 | UM: KG`).
+   אם אין → {"qty": "", "unit": ""}.
+
+8. alternative_material — חומר גלם חלופי מורשה (סעיף 20.2 וכדו'):
+   דוגמאות:
+     - "OTHER SIZE AND/OR SHAPE OF SAME MATERIAL AND THERMAL CONDITION IS APPROVED"
+     - "SIMILAR MATERIAL IS OPTIONAL, SUBJECTED TO CUSTOMER APPROVAL"
+     - "OPTIONAL MATERIAL: <spec>"
+   אם אין → "".
+
+9. general_instructions — הוראות כלליות (מערך מחרוזות):
+   🔴 **חובה לחלץ** מאחד מהמקורות הבאים:
+     • סעיף 10 "GENERAL INSTRUCTIONS" (ברוב שרטוטי PRC של RAFAEL).
+     • סעיף 20.x (חלק מההוראות מופיעות ברפאל גם כאן, למשל 20.1, 20.2).
+     • UOS block (UNLESS OTHERWISE SPECIFIED) בתחתית השרטוט — כולל תתי-סעיפים
+       a/b/c/d/e (פורמט Elbit Systems).
+     • NOTES כלליות (מספר נמוך, לפני סעיפי תהליך).
+   דוגמאות לתוכן:
+     - "THIS DRAWING SHALL BE USED WITH ITS MODEL FOR COMPLETE PRODUCT DEFINITION"
+     - "DIMENSIONAL LIMITS APPLY AFTER SURFACE TREATMENT UNLESS OTHERWISE SPECIFIED"
+     - "ALL DIMENSIONS ARE FINAL AFTER FINISH"
+     - "DIMENSIONS AND TOLERANCES ARE AFTER COATING"  (נפוץ ב-Elbit)
+     - "USE LATEST REVISION OF STANDARDS"
+     - "BREAK ALL SHARP EDGES" / "REMOVE BURRS AND BREAK SHARP EDGES"
+     - "FILLETS R 0.3 MAX" / "FILLETS R 0.5 MAX"  (UOS item נפוץ)
+     - "INTERPRET DRAWING PER ASME Y14.5-2009"
+   ⚠️ אסור לדלג. זה שדה חובה בשרטוטי PRC ובשרטוטי Elbit.
+   ⚠️ ב-UOS של Elbit קיימים תתי-סעיפים a/b/c/d/e — כל אחד מהם פריט נפרד.
+   אם אכן אין → [].
+
+10. os_level — רמת סיווג תפעולי של רפאל (Operational Safety Level):
+    מחרוזת "OS LEVEL A" / "OS LEVEL B" / "OS LEVEL C" / "".
+    מקור: Title Block ליד SIZE/REV או במסגרת השרטוט.
+    אם אין → "".
+
+11. cage_code — קוד CAGE CODE (5-6 תווים אלפאנומריים, למשל "0772A", "E0B7R6").
+    מקור: שדה CAGE CODE ב-Title Block. ⚠️ CAGE CODE ≠ part_number!
+    אם אין → "".
+
+12. material_formerly — תקני חומר מבוטלים בסוגריים (למשל "FORMERLY AMS QQ-A-250/8").
+    🔍 חפש את הביטוי "(FORMERLY ...)" בתוך שורת החומר והפרד את התוכן לשדה זה.
+    דוגמה:
+      מקור:  "AL 5052-H32 PER SAE-AMS-4016 (FORMERLY AMS QQ-A-250/8)"
+      → material = "AL 5052-H32 PER SAE-AMS-4016"
+      → material_formerly = "AMS QQ-A-250/8"
+    אם אין → "".
+
+13. environment_requirements — דרישות סביבת ייצור (מערך מחרוזות):
+    מילות מפתח: CLEAN ROOM / CLEANROOM / CLASS X / IPA CLEANING / ESD /
+                 CONTROLLED ENVIRONMENT / ANTI-STATIC / HUMIDITY CONTROLLED.
+    דוגמה: "CLEAN ROOM CLASS 10,000 AFTER FINAL COATING FOR HANDLING AND INSPECTION".
+    אל תמזג עם packaging_notes או inspection.
+    אם אין → [].
+
+14. title — כותרת/שם הפריט (TITLE / DESCRIPTION / NAME).
+    דוגמאות: "SCREW", "BRACKET", "CONTROL BOX HOUSING".
+    אם אין → "".
+
+15. part_weight — משקל הפריט המחושב/הסופי ({qty, unit}):
+    מקורות: WEIGHT / CALC. WT. / CALCULATED WEIGHT / משקל.
+    ⚠️ שונה מ-raw_weight (חומר גלם ב-RAFAEL PRC)!
+    דוגמה: "5.38 g" → {"qty": "5.38", "unit": "g"}.
+    אם אין → {"qty": "", "unit": ""}.
+
+16. revisions_history — היסטוריית גרסאות מלאה מטבלת REVISIONS (מערך):
+    חלץ **כל** שורה מהטבלה לפי הסדר בו הן מופיעות (הישנה ביותר ראשונה).
+    מבנה לכל פריט:
+      {"rev": "<אות/מספר גרסה>", "date": "<DD/MM/YYYY או כפי שכתוב>",
+       "description": "<תיאור השינוי>", "approved_by": "<שם/חתימה>"}
+    ה-``revision`` (שדה 2) הוא תמיד הפריט ה**אחרון** ברשימה הזו.
+    אם אין טבלת REVISIONS → [].
 
 החזר JSON בלבד (ללא טקסט נוסף):
 {
@@ -45,8 +138,48 @@
   "revision": "",
   "drawing_number": "",
   "customer": "",
-  "material": ""
+  "material": "",
+  "catalog_number": "",
+  "raw_weight": {"qty": "", "unit": ""},
+  "alternative_material": "",
+  "general_instructions": [],
+  "os_level": "",
+  "cage_code": "",
+  "material_formerly": "",
+  "environment_requirements": [],
+  "title": "",
+  "part_weight": {"qty": "", "unit": ""},
+  "revisions_history": []
 }
+
+═══════════════════════════════════════════════════════════════
+🔧 Mechanico-Shaftech Engineering — פורמט פשוט
+═══════════════════════════════════════════════════════════════
+   • customer = "Mechanico-Shaftech Engineering Ltd.".
+   • P/N בפורמט XXXX-XXXX-XX (למשל "1384-2153-01").
+   • **drawing_number = part_number** (אין שדה DWG נפרד — השתמש ב-P/N).
+   • REV בטבלת REVISIONS (לא ב-title block!) — קח את **הערך האחרון**.
+   • אין טבלת PRC — הכל ב-NOTES פשוטים.
+   • תהליכים שכיחים: PICKLING (ניקוי חמצון HF+HNO3), HYDROGEN EMBRITTLEMENT
+     (post-plate), HEAT TREATMENT (H925 וכדו'), ZINC PLATING.
+   • לעיתים אין PACKING בשרטוט — זה לגיטימי, אל תחלץ על דמיון.
+
+═══════════════════════════════════════════════════════════════
+🔷 ELBIT SYSTEMS — אם רואים "Elbit Systems" / "ELOP" / "Electro-Optics Elop"
+═══════════════════════════════════════════════════════════════
+   • customer = "Elbit Systems Electro-Optics Elop Ltd." (השם המלא).
+   • CAGE CODE נפוץ: "0772A".
+   • P/N בפורמט XXXX-XXXX-XX (עם מקפים), למשל "8554-3672-00".
+   • drawing_number = part_number ברוב המקרים.
+   • REV בפורמט ספרתי+אות ("01 Freeze", "A Released").
+   • אין טבלת PRC — הכל ב-NOTES 1-5.
+   • UOS block עם תתי-סעיפים a/b/c/d/e בטקסט קטן.
+   • תקני ASME נפוצים: Y14.5, Y14.38 (abbreviations), Y14.6aM (screw threads), Y14.41.
+   • ⚠️ UOS בטקסט קטן → שגיאות OCR. קרא בקפידה:
+     - "ASME Y14.6aM OR Y14.6, SCREW THREADS" (לא "SHEET 1S3.4"!)
+     - "ASME Y14.38, ABBREVIATIONS" (לא "REVISION"!)
+   • חומר לרוב מכיל FORMERLY → material_formerly.
+   • שרטוטים אלקטרו-אופטיים → CLEAN ROOM → environment_requirements.
 
 ═══════════════════════════════════════════════════════════════
 🔵 RAFAEL — הוראות ייעודיות (אם רואים את הלוגו / השם "RAFAEL")
@@ -85,6 +218,8 @@
        R00-A49880 ✅,  R01-B23456 ✅,  R10-C88888 ✅
        ROO לעולם לא מופיע!
    • "B" ≠ "8",  "1" ≠ "I",  "0" ≠ "O",  "6" ≠ "8",  "5" ≠ "S",  "2" ≠ "Z".
+   • **"7" ↔ "T"** — `BPT0534A` ❌ → `BP70534A` ✅ (T במקום הספרה 7).
+   • "D" / "Q" ≠ "0",  "L" ≠ "1".
    • 🔍 ספור את הספרות פעמיים ב-part_number ו-drawing_number של רפאל!
      מספרי P.N. של רפאל בפורמט BPxxxxxX או PWRLxxxxxX הם **באורך קבוע**:
        BP70689A  (7 תווים לפני האות) ≠ BP7069A (6 תווים).
@@ -92,6 +227,39 @@
    • הסתכל גם על השדה השני (DRAWING NO.) — לרוב P.N. ו-DRAWING NO. ברפאל
      **זהים לחלוטין** בשרטוטי חלק בודד. אם הם נראים שונים — בדוק שזה לא
      בגלל שספרת אחת לא נקראה.
+   • ⚠️ **כלל זהב לאיחוד P/N ו-Drawing**: אם שני השדות נבדלים רק בתו יחיד
+     שנראה כשגיאת OCR (למשל 7↔T, 8↔B) — הם אותו מזהה. הצורה הנכונה היא זו
+     עם **יותר ספרות** ברצף אחרי קידומת האותיות.
+
+🎯 **דפוסי P.N. של רפאל שמכילים ספרות באמצע**:
+   קידומות כמו BN / BP / BB / BO / BG / RF / PWRL / BBLE / HLTA / FTL / MMA
+   כמעט תמיד ממשיכות ב-**ספרות** (לא אותיות). אם אחרי הקידומת רואים "B"/"O"/"I"/"S"
+   בודדים בין ספרות — זו כמעט תמיד שגיאת OCR.
+   דוגמאות נפוצות לטעויות (❌ שגוי → ✅ נכון):
+     • "BNB0760B"  →  "BN80760B"  (ה-B המרכזי הוא הספרה 8)
+     • "BPB9542A"  →  "BP89542A"
+     • "BG5B498"   →  "BG58498"
+   חוק אצבע: בין שתי ספרות, "B" נקרא כ-**8**, "O" כ-**0**, "I" כ-**1**, "S" כ-**5**.
+   ⚠️ אם שם קובץ ה-PDF מכיל מחרוזת שנראית כמו P.N. — השתמש בה כהתייחסות לאימות.
+
+🎯 **פורמט P.N. של רפאל — מבנה קבוע**:
+   P.N. של רפאל מתחיל **תמיד** בשתי אותיות (או יותר) של prefix, ואז ספרה —
+   לא באות בודדת בין הקידומת לספרות.
+   שגיאת OCR נפוצה (החלפת סדר תווים סמוכים):
+     • `BBJ10223A`  ❌ → ✅ `BB1J0223A`  (ה-J וה-1 התחלפו)
+   ⚠️ אם אחרי prefix של שתי אותיות רואים אות (לא ספרה) — בדוק אם התו הבא ספרה
+      שיכולה להתחלף איתה.
+
+🧪 **חומרים נפוצים ברפאל (לאימות OCR):**
+   • "OCOLONE" — סגסוגת נחושת-ניקל, נפוץ במחברים. אל תקרא בטעות
+     "COLDONE" / "OCOLINE" / "OCOLENE" — זו תמיד **OCOLONE**.
+   • "ALUMINUM ALLOY 6061-T6" / "6061-T651"
+   • "STAINLESS STEEL 17-4PH" / "15-5PH"
+   • "TITANIUM Ti-6Al-4V"
+   • "BRASS C36000" / "C46400"
+   • "BERYLLIUM COPPER" / "BeCu"
+   ⚠️ אם רואים שם חומר שנראה דומה לאחד מהנ"ל אבל שונה בתו אחד — עדיף לבחור
+      את הצורה המוכרת (רוב הסיכויים ששגיאת OCR).
 
 ⚠️ פורמט חלופי של רפאל (שרטוטים ישנים — ללא תאי P.N. / DRAWING NO. מסומנים):
    • מופיע מספר גדול ובולט באמצע הדף (4-6 ספרות), למשל "51033", "1402".
@@ -103,6 +271,15 @@
    ❌ part_number = DRAWING NO. או להפך (אלא אם הם באמת זהים בתאים שלהם)
    ❌ revision = SIZE (A1/A2/A3 הם גודל דף, לא גרסה!)
    ❌ להחזיר part_number ריק כש-P.N. ברור בתא! ברפאל ה-P.N. תמיד מופיע.
+
+═══════════════════════════════════════════════════════════════
+🐦 BIRD AEROSYSTEMS — אם רואים לוגו BIRD או customer="BIRD AEROSYSTEMS"
+═══════════════════════════════════════════════════════════════
+   • P/N ו-DRAWING NO. מתחילים **תמיד** ב-"BAS" (BAS2289913200, BAS1234567).
+   • **לעולם לא** תחזיר DWG עם BAS בסוף (❌ "228991320BAS") — BAS בהתחלה!
+     אם רואים BAS בסוף/אמצע — זו טעות קריאה, תקן.
+   • NOTES ממוספרות היררכית (3.1, 4.1, 5.1). ההיררכיה חשובה לסיווג.
+   • UOS block לרוב מכיל ASME Y14.5 / ISO 1302.
 
 ⚠️ קבלת החלטה במקרה ספק:
    • אם P.N. ו-DRAWING NO. נראים זהים בשני התאים — שניהם אותו ערך, מלא את שניהם.

@@ -1,5 +1,5 @@
 """
-חילוץ נתונים משרטוט PDF — מודול ראשי של DrawingAI Lite.
+חילוץ נתונים משרטוט PDF — מודול ראשי של AIDrawAnalyser.
 עם Cost Tracking + OCR Fallback + Drawing Cache.
 """
 import logging
@@ -23,6 +23,11 @@ from core.ai_helpers import call_vision as _call_vision
 from core.ai_helpers import call_text as _call_text
 from core.ai_helpers import safe_call as _safe_call
 from core.drawing_cache import get_cached_result, save_cached_result
+from core.pn_utils import (
+    reconcile_part_number as _reconcile_part_number,
+    reconcile_drawing_number as _reconcile_drawing_number,
+    reconcile_revision as _reconcile_revision,
+)
 from core.exceptions import (
     PDFError,
     StageFailedError,
@@ -68,82 +73,6 @@ def _notes_hint_coating(stage1: dict, stage2: dict) -> bool:
         str(stage2.get("notes") or ""),
     ])
     return bool(_COATING_KEYWORDS_RE.search(text))
-
-
-# מספר פריט לרוב: 5-15 תווים, אותיות+ספרות, אופציונלי מקפים פנימיים
-# Whitelist של prefixes מוכרים של לקוחות — מקבלים עדיפות
-_KNOWN_PN_PREFIXES = (
-    "PWRL", "BBLE", "HLTA", "FTLS", "FTL",  # RAFAEL
-    "BG", "BO", "RF",                        # RAFAEL קצרים
-    "BP",                                    # B2B / Aerospace
-    "IAI",                                   # Israel Aerospace
-    "EL",                                    # Elbit
-)
-# Blacklist של מחרוזות שאסור לקחת (false positives נפוצים)
-_PN_BLACKLIST = {"CAGE", "DWG", "DRAW", "DATE", "NOTES", "QTY", "SIZE",
-                 "REV", "SHEET", "SCALE", "TOLERANCE", "FINISH"}
-
-_PN_PATTERN = re.compile(r"\b([A-Z]{2,4}[A-Z0-9]{0,3}\d{2,}[A-Z0-9]*)\b")
-
-
-def _extract_pn_from_filename(filename: str) -> str:
-    """מנסה למצוא מספר פריט בשם הקובץ (זהיר — מסנן blacklist + עדיפות whitelist)."""
-    if not filename:
-        return ""
-    stem = Path(filename).stem.upper()
-    # ננקה תחיליות שכיחות
-    for prefix in ("B2BDRAW_", "DRAW_", "_"):
-        if stem.startswith(prefix):
-            stem = stem[len(prefix):]
-    # פיצול לסגמנטים לפי מקף, קו תחתון או סוגריים
-    segments = re.split(r"[-_()\s]+", stem)
-    candidates: list[str] = []
-    for seg in segments:
-        for m in _PN_PATTERN.findall(seg):
-            # דרישות:
-            # 1. אורך סביר (5-15)
-            # 2. גם אות וגם ספרה
-            # 3. לא ברשימה השחורה
-            if not (5 <= len(m) <= 15):
-                continue
-            if m.isdigit() or not any(c.isalpha() for c in m):
-                continue
-            if any(bl in m for bl in _PN_BLACKLIST):
-                continue
-            candidates.append(m)
-    if not candidates:
-        return ""
-    # עדיפות ל-prefix מוכר
-    for c in candidates:
-        if c.startswith(_KNOWN_PN_PREFIXES):
-            return c
-    # אחרת — הארוך ביותר, אבל רק אם 6+ תווים (להיות זהירים)
-    longest = max(candidates, key=len)
-    return longest if len(longest) >= 6 else ""
-
-
-def _reconcile_part_number(stage1: dict, filename: str) -> None:
-    """משלים part_number כש-Stage 1 לא הצליח לחלץ.
-
-    כללים (שמרני — לא מחליפים ערך תקף קיים):
-    - אם part_number ריק אבל drawing_number קיים → השתמש ב-drawing_number
-      (נפוץ ברפאל — אותו ערך מופיע ב-P.N. וב-DRAWING NO.).
-    - אחרת, אם שם הקובץ מכיל מועמד סביר — השתמש בו.
-    """
-    pn = (stage1.get("part_number") or "").strip()
-    if pn:
-        return  # יש כבר ערך — לא נוגעים
-
-    dn = (stage1.get("drawing_number") or "").strip()
-    if dn:
-        stage1["part_number"] = dn
-        logger.info(f"📝 part_number הושלם מ-drawing_number: {dn}")
-        return
-
-    fname_pn = _extract_pn_from_filename(filename)
-    if fname_pn:
-        stage1["part_number"] = fname_pn
-        logger.info(f"📝 part_number הושלם משם הקובץ: {fname_pn}")
 
 
 def _proc_to_str(p) -> str:
@@ -308,6 +237,10 @@ def extract_drawing(pdf_path: str | Path, use_ocr_fallback: bool = True) -> dict
 
     # ─── Post-processing: השלמה / תיקון part_number ───
     _reconcile_part_number(stage1, pdf_path.name)
+
+    # ─── Post-processing: DWG=PN fallback + Rev fallback (נפוץ בלקוחות קטנים) ───
+    _reconcile_drawing_number(stage1)
+    _reconcile_revision(stage1, pdf_path.name)
 
     # ─── Stage 3 — סיכום עברי ───
     logger.info("Stage 3: יצירת סיכום עברי...")

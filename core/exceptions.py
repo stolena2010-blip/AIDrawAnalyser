@@ -1,5 +1,8 @@
 """
-Custom exceptions for DrawingLight.
+Custom exceptions for AIDrawAnalyser.
+
+הערה: שם המחלקה `DrawingLightError` נשאר מטעמי תאימות עם import-ים ברחבי
+הקוד והטסטים — זה מזהה Python פנימי, לא שם-האפליקציה שמוצג למשתמש.
 
 היררכיית שגיאות מרוכזת עם הודעות משתמש ידידותיות בעברית,
 רמות חומרה, והצעות לפתרון. מאפשרת לממשק להציג הודעות ברורות
@@ -24,7 +27,7 @@ Severity = Literal["info", "warning", "error", "critical"]
 
 
 class DrawingLightError(Exception):
-    """בסיס לכל השגיאות היישומיות של DrawingLight."""
+    """בסיס לכל השגיאות היישומיות של AIDrawAnalyser."""
 
     default_user_message = "אירעה שגיאה לא צפויה."
     default_suggestion = "נסי שוב. אם הבעיה ממשיכה — פני למפתח."

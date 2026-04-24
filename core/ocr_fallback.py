@@ -5,6 +5,7 @@ OCR fallback — משתמש ב-Tesseract להוצאת טקסט כשה-Vision API
 ל-Stage 1 עם prompt משופר שכולל את הטקסט שהוצא.
 """
 import logging
+import os
 from pathlib import Path
 
 from .pdf_utils import _render_pdf_to_pil
@@ -15,6 +16,22 @@ logger = logging.getLogger(__name__)
 try:
     import pytesseract
     TESSERACT_AVAILABLE = True
+
+    # אם המשתמש הגדיר TESSERACT_PATH ב-.env או אם Tesseract מותקן במיקום
+    # ברירת-המחדל הנפוץ ב-Windows אבל לא ב-PATH — הצבע עליו ישירות.
+    _TESSERACT_DEFAULTS = [
+        os.getenv("TESSERACT_PATH", "").strip(),
+        r"C:\Program Files\Tesseract-OCR",
+        r"C:\Program Files (x86)\Tesseract-OCR",
+    ]
+    for _dir in _TESSERACT_DEFAULTS:
+        if not _dir:
+            continue
+        _exe = Path(_dir) / "tesseract.exe"
+        if _exe.exists():
+            pytesseract.pytesseract.tesseract_cmd = str(_exe)
+            logger.info("Tesseract binary: %s", _exe)
+            break
 except ImportError:
     TESSERACT_AVAILABLE = False
     logger.warning("pytesseract לא מותקן — OCR fallback לא יפעל")

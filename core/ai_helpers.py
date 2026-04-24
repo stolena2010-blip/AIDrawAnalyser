@@ -46,7 +46,8 @@ def retry_on_transient(
     Decorator — retry עם exponential backoff + jitter לשגיאות זמניות.
 
     מתאים לקריאות AI שלעיתים נכשלות מרייט-לימיט / timeout.
-    לא עושה retry על שגיאות DrawingLight ספציפיות (MissingCredentials וכו').
+    לא עושה retry על שגיאות AIDrawAnalyser ספציפיות (מחלקת DrawingLightError
+    וצאצאיה — MissingCredentials וכו'). שם המחלקה נשאר Legacy לתאימות imports.
 
     Args:
         max_attempts: מספר ניסיונות מירבי (כולל הראשון)

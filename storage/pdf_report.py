@@ -136,6 +136,25 @@ def _cover_html(n_drawings: int) -> str:
     )
 
 
+def _cover_html_single(d: dict) -> str:
+    """כותרת דוח עבור שרטוט בודד — ללא טרמינולוגיה של מכלול."""
+    ts = datetime.now().strftime("%d/%m/%Y %H:%M")
+    pn = d.get("part_number") or "—"
+    dn = d.get("drawing_number") or "—"
+    rev = d.get("revision") or "—"
+    cust = d.get("customer") or "—"
+    return (
+        f"<h1>📐 דוח ניתוח שרטוט</h1>"
+        f'<div class="meta-card">'
+        f'<p><span class="muted">📅 תאריך הפקה:</span> <b>{ts}</b></p>'
+        f'<p><span class="muted">🔢 מספר פריט:</span> <b>{_ltr(pn)}</b></p>'
+        f'<p><span class="muted">📐 מספר שרטוט:</span> <b>{_ltr(dn)}</b></p>'
+        f'<p><span class="muted">🔁 גרסה:</span> <b>{_ltr(rev)}</b></p>'
+        f'<p><span class="muted">🏢 לקוח:</span> <b>{_h(cust)}</b></p>'
+        f"</div>"
+    )
+
+
 def _relationships_html(rel: dict | None) -> str:
     if not rel:
         return ""
@@ -276,6 +295,58 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
     qty = _ltr(d.get("quantity") or "—")
     role = _h(d.get("assembly_role") or "—")
     src = _ltr(d.get("source_filename") or "")
+    cat = (d.get("catalog_number") or "").strip()
+    rw = d.get("raw_weight") or {}
+    rw_qty = (rw.get("qty") or "").strip() if isinstance(rw, dict) else ""
+    rw_unit = (rw.get("unit") or "").strip() if isinstance(rw, dict) else ""
+    raw_weight_text = f"{rw_qty} {rw_unit}".strip()
+    alt_mat = (d.get("alternative_material") or "").strip()
+    os_lvl = (d.get("os_level") or "").strip()
+    cage = (d.get("cage_code") or "").strip()
+    mat_formerly = (d.get("material_formerly") or "").strip()
+    title = (d.get("title") or "").strip()
+    pw = d.get("part_weight") or {}
+    pw_qty = (pw.get("qty") or "").strip() if isinstance(pw, dict) else ""
+    pw_unit = (pw.get("unit") or "").strip() if isinstance(pw, dict) else ""
+    part_weight_text = f"{pw_qty} {pw_unit}".strip() if pw_qty or pw_unit else ""
+
+    extras_html = ""
+    bits = []
+    if title:
+        bits.append(f'<span class="muted">כותרת:</span> <b>{_h(title)}</b>')
+    if cat:
+        bits.append(f'<span class="muted">CAT NO.:</span> <b>{_ltr(cat)}</b>')
+    if cage:
+        bits.append(f'<span class="muted">CAGE:</span> <b>{_ltr(cage)}</b>')
+    if raw_weight_text:
+        bits.append(
+            f'<span class="muted">משקל חומר גלם:</span> <b>{_ltr(raw_weight_text)}</b>'
+        )
+    if part_weight_text:
+        bits.append(
+            f'<span class="muted">משקל פריט:</span> <b>{_ltr(part_weight_text)}</b>'
+        )
+    if os_lvl:
+        bits.append(
+            f'<span class="muted">OS Level:</span> '
+            f'<b style="color:#b02a37;">{_h(os_lvl)}</b>'
+        )
+    if bits:
+        extras_html = "<p>" + " · ".join(bits) + "</p>"
+
+    alt_html = ""
+    if alt_mat:
+        alt_html = (
+            f'<p style="font-style:italic; color:#495057;">'
+            f'🔄 <span class="muted">חומר חלופי מורשה:</span> '
+            f'{_h(alt_mat)}</p>'
+        )
+    if mat_formerly:
+        alt_html += (
+            f'<p style="font-style:italic; color:#6c757d;">'
+            f'📜 <span class="muted">תקנים מבוטלים (formerly):</span> '
+            f'{_h(mat_formerly)}</p>'
+        )
 
     parts = [
         f"<h2>📄 שרטוט {idx}/{total} — {pn}</h2>",
@@ -288,8 +359,36 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
         f'<p><span class="muted">חומר:</span> <b>{mat}</b> · '
         f'<span class="muted">תפקיד:</span> <b>{role}</b> · '
         f'<span class="muted">כמות:</span> <b>{qty}</b></p>'
+        f'{extras_html}'
+        f'{alt_html}'
         "</div>",
     ]
+
+    # הוראות כלליות (סעיף 10)
+    gen_instr = d.get("general_instructions") or []
+    if gen_instr and isinstance(gen_instr, list):
+        rows_html = "".join(
+            f"<li>{_h(item)}</li>"
+            for item in gen_instr
+            if isinstance(item, str) and item.strip()
+        )
+        if rows_html:
+            parts.append(
+                f"<h3>📜 הוראות כלליות</h3><ul>{rows_html}</ul>"
+            )
+
+    # תנאי סביבה (CLEAN ROOM / ESD / IPA)
+    env_req = d.get("environment_requirements") or []
+    if env_req and isinstance(env_req, list):
+        env_rows = "".join(
+            f"<li>{_h(item)}</li>"
+            for item in env_req
+            if isinstance(item, str) and item.strip()
+        )
+        if env_rows:
+            parts.append(
+                f"<h3>🌡️ תנאי סביבה / Clean Room</h3><ul>{env_rows}</ul>"
+            )
 
     # BOM
     bom = d.get("bom_items") or []
@@ -310,6 +409,32 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
         parts.append("<h3>🔧 עיבוד שבבי</h3>")
         parts.append(_step_table(
             machining,
+            [("שלב", "step_no"), ("אנגלית", "name_en"),
+             ("עברית", "name_he"), ("פרטים", "details")],
+            table_class="tbl-step",
+            col_classes=["c-step", "c-en", "c-he", "c-det"],
+            ltr_keys=("step_no", "name_en"),
+        ))
+
+    # ריתוך
+    welding = d.get("welding_processes") or []
+    if welding:
+        parts.append("<h3>🔥 ריתוך</h3>")
+        parts.append(_step_table(
+            welding,
+            [("שלב", "step_no"), ("אנגלית", "name_en"),
+             ("עברית", "name_he"), ("פרטים", "details")],
+            table_class="tbl-step",
+            col_classes=["c-step", "c-en", "c-he", "c-det"],
+            ltr_keys=("step_no", "name_en"),
+        ))
+
+    # טיפול חום
+    heat_treat = d.get("heat_treatment_processes") or []
+    if heat_treat:
+        parts.append("<h3>🌡️ טיפול חום</h3>")
+        parts.append(_step_table(
+            heat_treat,
             [("שלב", "step_no"), ("אנגלית", "name_en"),
              ("עברית", "name_he"), ("פרטים", "details")],
             table_class="tbl-step",
@@ -385,6 +510,19 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
             f"{head}<tbody>{rows}</tbody></table>"
         )
 
+    # בדיקות NDT
+    ndt = d.get("ndt_processes") or []
+    if ndt:
+        parts.append("<h3>🔬 בדיקות NDT</h3>")
+        parts.append(_step_table(
+            ndt,
+            [("שלב", "step_no"), ("אנגלית", "name_en"),
+             ("עברית", "name_he"), ("פרטים", "details")],
+            table_class="tbl-step",
+            col_classes=["c-step", "c-en", "c-he", "c-det"],
+            ltr_keys=("step_no", "name_en"),
+        ))
+
     # בדיקות
     inspect = d.get("inspection_processes") or []
     if inspect:
@@ -417,10 +555,11 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
         parts.append("<h3>🛠️ תהליכים מלווים</h3>")
         parts.append(_step_table(
             additional,
-            [("אנגלית", "name_en"), ("עברית", "name_he")],
+            [("שלב", "step_no"), ("אנגלית", "name_en"),
+             ("עברית", "name_he"), ("פרטים", "details")],
             table_class="tbl-step",
-            col_classes=["c-en", "c-he"],
-            ltr_keys=("name_en",),
+            col_classes=["c-step", "c-en", "c-he", "c-det"],
+            ltr_keys=("step_no", "name_en"),
         ))
 
     # תקנים
@@ -456,11 +595,15 @@ def build_assembly_pdf(
     drawings: list[dict],
     relationships: dict | None,
     out_path: Path,
+    *,
+    single_mode: bool = False,
 ) -> Path:
     """בונה דוח PDF מלא ושומר אותו ל-out_path.
 
     משתמש ב-DocumentWriter + Story של PyMuPDF — מטפל אוטומטית
     בגלישת תוכן בין עמודים, כולל RTL לעברית.
+
+    single_mode=True → כותרת "דוח ניתוח שרטוט" (יחיד), ללא סעיף קשרים.
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -472,7 +615,11 @@ def build_assembly_pdf(
 
     # אוסף את כל ה-HTML לחלקים — כל חלק יתחיל בעמוד חדש
     sections: list[str] = []
-    sections.append(_wrap_rtl(_cover_html(len(drawings)) + _relationships_html(relationships)))
+    if single_mode and drawings:
+        cover = _cover_html_single(drawings[0])
+    else:
+        cover = _cover_html(len(drawings)) + _relationships_html(relationships)
+    sections.append(_wrap_rtl(cover))
     total = len(drawings)
     for i, d in enumerate(drawings, 1):
         sections.append(_wrap_rtl(_drawing_html(d, i, total)))
@@ -782,6 +929,65 @@ def _flatten_tree_rows(
         # אין relationships בכלל — הצג רשימה שטוחה
         return extras
     rows.extend(extras)
+
+    # ─── פריטי קנייה (Purchased Parts): פריטי BOM שאין להם שרטוט מועלה ───
+    # ברגים, ואשרים, פינים, קאסטורים וכד' מטבעם אין להם שרטוט, והם חלק
+    # לגיטימי מהמכלול. אסור להשמיט אותם מעץ המוצר.
+    seen_pns: set[str] = {
+        (r.get("part_number") or "").strip().upper()
+        for r in rows
+        if (r.get("part_number") or "").strip() and r.get("part_number") != "—"
+    }
+
+    for d in drawings or []:
+        if not isinstance(d, dict):
+            continue
+        role = (d.get("assembly_role") or "").strip().upper()
+        parent = (d.get("part_number") or "").strip()
+        if role != "ASSEMBLY" or not parent or _is_overview_value(parent):
+            continue
+        parent_u = parent.upper()
+        # ודא שה-parent נמצא בעץ ברמה כלשהי
+        if not any(
+            (r.get("part_number") or "").strip().upper() == parent_u
+            for r in rows
+        ):
+            continue
+
+        for it in (d.get("bom_items") or []):
+            if not isinstance(it, dict):
+                continue
+            cpn = (it.get("part_number") or "").strip()
+            if not cpn:
+                continue
+            cpn_u = cpn.upper()
+            if cpn_u in seen_pns:
+                continue  # כבר בעץ (כ-child של LLM או שרטוט הועלה)
+
+            raw_desc = (it.get("description") or "").strip()
+            raw_qty = (it.get("qty") or "").strip()
+            # זיהוי OCR_UNREADABLE: שני השדות ריקים
+            is_unreadable = not raw_desc and not raw_qty
+            desc = (
+                "[OCR_UNREADABLE] פרטים לא קריאים"
+                if is_unreadable
+                else (raw_desc or "[PURCHASED PART / NO DRAWING]")
+            )
+            qty = raw_qty or "—"
+
+            rows.append({
+                "level": 1,
+                "part_number": cpn,
+                "drawing_number": "",
+                "description": desc,
+                "qty": qty,
+                "material": "",
+                "parent_part_number": parent,
+                "root_part_number": parent,
+                "hierarchy_path": f"{parent} > {cpn}",
+            })
+            seen_pns.add(cpn_u)
+
     return rows
 
 
@@ -1106,10 +1312,13 @@ def build_assembly_excel(
     drawings: list[dict],
     relationships: dict | None,
     out_path: Path,
+    *,
+    single_mode: bool = False,
 ) -> Path:
-    """ייצוא Excel מקיף של כל הניתוח עם 12 גיליונות:
-    סיכום · עץ מוצר · BOM · עיבוד שבבי · ציפויים · צביעה ·
-    בדיקות · אישור סופי · תקנים · תהליכים נוספים · עלויות · עץ מתמונה.
+    """ייצוא Excel מקיף של כל הניתוח עם גיליונות מרובים.
+
+    single_mode=True → מדלג על גיליונות 'עץ מוצר' ו-'עץ מתמונה'
+    (מתאים לדוח של שרטוט בודד ללא היררכיה).
     """
     import pandas as pd  # ייבוא עצל
 
@@ -1124,19 +1333,39 @@ def build_assembly_excel(
         if not isinstance(d, dict):
             continue
         cost = (d.get("_cost_info") or {}).get("total_cost_usd", "")
+        rw = d.get("raw_weight") or {}
+        rw_qty = (rw.get("qty") or "") if isinstance(rw, dict) else ""
+        rw_unit = (rw.get("unit") or "") if isinstance(rw, dict) else ""
+        pw = d.get("part_weight") or {}
+        pw_qty = (pw.get("qty") or "") if isinstance(pw, dict) else ""
+        pw_unit = (pw.get("unit") or "") if isinstance(pw, dict) else ""
         summary_rows.append({
             "קובץ": d.get("source_filename", ""),
             "P/N": d.get("part_number", ""),
             "Drawing No.": d.get("drawing_number", ""),
             "Rev": d.get("revision", ""),
             "לקוח": d.get("customer", ""),
+            "כותרת": d.get("title", ""),
             "חומר": d.get("material", ""),
             "כמות": d.get("quantity", ""),
+            "CAT NO.": d.get("catalog_number", ""),
+            "CAGE": d.get("cage_code", ""),
+            "משקל גלם": f"{rw_qty} {rw_unit}".strip() if rw_qty or rw_unit else "",
+            "משקל פריט": f"{pw_qty} {pw_unit}".strip() if pw_qty or pw_unit else "",
+            "חומר חלופי": d.get("alternative_material", ""),
+            "חומר מבוטל (formerly)": d.get("material_formerly", ""),
+            "OS Level": d.get("os_level", ""),
+            "תנאי סביבה": "; ".join(
+                str(x) for x in (d.get("environment_requirements") or []) if x
+            ),
             "תפקיד": d.get("assembly_role", ""),
             "BOM items": len(d.get("bom_items") or []),
             "עיבוד שבבי": len(d.get("machining_processes") or []),
+            "ריתוך": len(d.get("welding_processes") or []),
+            "טיפול חום": len(d.get("heat_treatment_processes") or []),
             "ציפויים": len(d.get("coating_processes") or []),
             "צביעות": len(d.get("painting_processes") or []),
+            "NDT": len(d.get("ndt_processes") or []),
             "בדיקות": len(d.get("inspection_processes") or []),
             "תקנים": len(d.get("standards") or []),
             "OCR בשימוש": "כן" if d.get("_ocr_used") else "לא",
@@ -1185,6 +1414,16 @@ def build_assembly_excel(
         ["step_no", "name_en", "name_he", "details"],
         ["שלב", "שם (EN)", "שם (HE)", "פרטים"],
     )
+    weld_rows = _flatten_process_rows(
+        drawings, "welding_processes",
+        ["step_no", "name_en", "name_he", "details"],
+        ["שלב", "שם (EN)", "שם (HE)", "פרטים"],
+    )
+    heat_rows = _flatten_process_rows(
+        drawings, "heat_treatment_processes",
+        ["step_no", "name_en", "name_he", "details"],
+        ["שלב", "שם (EN)", "שם (HE)", "פרטים"],
+    )
     coat_rows = _flatten_process_rows(
         drawings, "coating_processes",
         ["step_no", "type", "type_he", "name", "thickness", "standard", "rohs"],
@@ -1194,6 +1433,11 @@ def build_assembly_excel(
         drawings, "painting_processes",
         ["step_no", "type", "type_he", "name", "thickness", "standard", "rohs"],
         ["שלב", "סוג (EN)", "סוג (HE)", "שם מלא", "עובי", "תקן", "RoHS"],
+    )
+    ndt_rows = _flatten_process_rows(
+        drawings, "ndt_processes",
+        ["step_no", "name_en", "name_he", "details"],
+        ["שלב", "שם (EN)", "שם (HE)", "פרטים"],
     )
     insp_rows = _flatten_process_rows(
         drawings, "inspection_processes",
@@ -1221,13 +1465,16 @@ def build_assembly_excel(
     for d in drawings:
         for p in (d.get("additional_processes") or []):
             if isinstance(p, dict):
+                step = p.get("step_no", "")
+                details = p.get("details", "")
+                detail_col = f"{step} | {details}".strip(" |") if step or details else ""
                 extra_rows.append({
                     "קובץ": d.get("source_filename", ""),
                     "P/N": d.get("part_number", ""),
                     "סוג": "תהליך נוסף",
                     "EN": p.get("name_en", ""),
                     "HE": p.get("name_he", ""),
-                    "פרטים": "",
+                    "פרטים": detail_col,
                 })
         pkg = d.get("packaging_notes") or {}
         if isinstance(pkg, dict) and (pkg.get("en") or pkg.get("he")):
@@ -1286,17 +1533,26 @@ def build_assembly_excel(
                                   "F": 32, "G": 8, "H": 16, "I": 11, "J": 12,
                                   "K": 10, "L": 10, "M": 10, "N": 9, "O": 12,
                                   "P": 12}),
-        ("עץ מוצר", tree_rows, {
+    ]
+    if not single_mode:
+        sheets.append(("עץ מוצר", tree_rows, {
             "A": 6, "B": 20, "C": 20, "D": 18, "E": 34,
             "F": 8, "G": 24, "H": 38, "I": 9,
-        }),
+        }))
+    sheets.extend([
         ("BOM", bom_rows, {"A": 22, "B": 38, "C": 10, "D": 22, "E": 38, "F": 8}),
         ("עיבוד שבבי", mach_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
+                                    "E": 26, "F": 50}),
+        ("ריתוך", weld_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
+                                "E": 26, "F": 50}),
+        ("טיפול חום", heat_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
                                     "E": 26, "F": 50}),
         ("ציפויים", coat_rows, {"A": 38, "B": 18, "C": 8, "D": 18, "E": 18,
                                 "F": 32, "G": 12, "H": 28, "I": 8}),
         ("צביעה", paint_rows, {"A": 38, "B": 18, "C": 8, "D": 18, "E": 18,
                                 "F": 32, "G": 12, "H": 28, "I": 8}),
+        ("NDT", ndt_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
+                            "E": 26, "F": 50}),
         ("בדיקות", insp_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
                                 "E": 26, "F": 50}),
         ("אישור סופי", final_rows, {"A": 38, "B": 18, "C": 8, "D": 26,
@@ -1306,13 +1562,14 @@ def build_assembly_excel(
                                          "E": 50, "F": 16}),
         ("עלויות", cost_rows, {"A": 38, "B": 22, "C": 14, "D": 14, "E": 12,
                                 "F": 12}),
-        ("עץ מתמונה", tree_image_rows, {
+    ])
+    if not single_mode:
+        sheets.append(("עץ מתמונה", tree_image_rows, {
             "A": 24, "B": 16, "C": 16, "D": 10,
             "E": 16, "F": 30, "G": 12, "H": 16,
             "I": 16, "J": 12, "K": 24, "L": 32,
             "M": 12, "N": 12,
-        }),
-    ]
+        }))
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         for sheet_name, rows, widths in sheets:
