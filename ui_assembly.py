@@ -20,6 +20,7 @@ from core.assembly import (
     extract_assembly_overview_image,
 )
 from core.exceptions import format_error_for_ui, get_streamlit_level
+from core.history import append_history
 from core.pn_utils import cross_reference_part_numbers
 from storage.pdf_report import (
     build_assembly_excel,
@@ -914,6 +915,31 @@ def render_assembly_mode(output_dir: Path):
         st.session_state["asm_index"] = 0
         st.session_state["asm_relationships"] = None  # נדרש מחדש
         st.success(f"✅ נותחו {len(results)} שרטוטים")
+        # log to history (best-effort)
+        try:
+            total_cost = sum(
+                (r.get("_cost_info") or {}).get("total_cost_usd", 0)
+                for r in results
+            )
+            total_warnings = sum(
+                len(r.get("_validation_warnings") or []) for r in results
+            )
+            asm_pn = next(
+                (r.get("part_number", "") for r in results
+                 if r.get("assembly_role", "").upper() == "ASSEMBLY"),
+                results[0].get("part_number", "") if results else "",
+            )
+            append_history(
+                filename=f"{len(results)} drawings",
+                mode="assembly",
+                part_number=asm_pn,
+                drawing_count=len(results),
+                warning_count=total_warnings,
+                cost_usd=total_cost,
+                cache_hit=(total_cost == 0),
+            )
+        except Exception:
+            logger.warning("history logging failed", exc_info=True)
         if pn_corrections:
             st.info(
                 "🔧 **תיקון P/N אוטומטי** (על סמך BOM של שרטוטים אחרים):\n\n"

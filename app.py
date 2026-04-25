@@ -24,6 +24,7 @@ from core.azure_client import (
 from core.cost_tracker import get_aggregate_stats
 from core.demo_data import DEMO_FILENAME, get_demo_result, is_demo_result
 from core.exceptions import format_error_for_ui, get_streamlit_level
+from core.history import append_history
 from core.ocr_fallback import is_ocr_available
 from storage.pdf_report import (
     build_assembly_excel,
@@ -713,6 +714,174 @@ if st.session_state.get("_show_customer_manager"):
 
 
 # ═══════════════════════════════════════════════════════════════
+# פאנל סטטיסטיקות — היסטוריית ניתוחים + עלויות
+# ═══════════════════════════════════════════════════════════════
+@st.dialog("📊 סטטיסטיקות וניתוחים אחרונים", width="large")
+def _show_stats_dashboard_dialog():
+    """דף עם 2 טאבים: היסטוריה (ניתוחים אחרונים) + עלויות (גרפים + ROI)."""
+    from core.history import (
+        aggregate_stats,
+        clear_history,
+        read_history,
+    )
+
+    history_records = read_history(limit=200)
+    stats = aggregate_stats(history_records)
+
+    # Hero metrics
+    if stats["count"] > 0:
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("ניתוחים", stats["count"])
+        m2.metric("סה\"כ עלות", f"${stats['total_cost_usd']:.2f}")
+        m3.metric("ממוצע לניתוח", f"${stats['avg_cost_usd']:.4f}")
+        m4.metric("Cache hit rate", f"{stats['cache_hit_rate']*100:.0f}%",
+                  help="אחוז ניתוחים שנטענו מ-cache במקום קריאה ל-Azure (חיסכון)")
+    else:
+        st.info("📥 עוד לא בוצעו ניתוחים. הקובץ history יתעדכן אחרי הניתוח הראשון.")
+
+    tab_history, tab_costs, tab_roi = st.tabs([
+        "📋 ניתוחים אחרונים",
+        "💰 פילוח עלויות",
+        "📈 ROI Calculator",
+    ])
+
+    # ═══ TAB 1: HISTORY ═══
+    with tab_history:
+        if not history_records:
+            st.caption("אין רשומות. נסי לנתח שרטוט קודם.")
+        else:
+            st.caption(f"מציג {len(history_records)} רשומות אחרונות (מהחדש לישן)")
+            rows = []
+            for r in history_records:
+                rows.append({
+                    "תאריך": r.get("timestamp", "")[:19].replace("T", " "),
+                    "מצב": "🔍 בודד" if r.get("mode") == "single" else "🧩 מכלול",
+                    "P/N": r.get("part_number", "—"),
+                    "שרטוטים": r.get("drawing_count", 1),
+                    "אזהרות": r.get("warning_count", 0),
+                    "עלות $": f"${r.get('cost_usd', 0):.4f}",
+                    "Cache": "🎯" if r.get("cache_hit") else "🆕",
+                    "Review": {
+                        "reviewed": "✅",
+                        "edited": "✏️",
+                        "pending": "⏳",
+                    }.get(r.get("review_status", "pending"), "⏳"),
+                })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+
+            st.divider()
+            cb1, cb2 = st.columns([1, 3])
+            with cb1:
+                if st.button("🗑️ נקה היסטוריה", use_container_width=True,
+                             help="מוחק את output/history.jsonl. לא נוגע בקבצי תוצאות."):
+                    n = clear_history()
+                    st.warning(f"נמחקו {n} רשומות")
+                    st.rerun()
+
+    # ═══ TAB 2: COSTS ═══
+    with tab_costs:
+        if not history_records:
+            st.caption("אין נתונים לפילוח.")
+        else:
+            # Cost over time
+            from collections import defaultdict
+            daily = defaultdict(lambda: {"cost": 0.0, "count": 0})
+            for r in history_records:
+                day = (r.get("timestamp") or "")[:10]  # YYYY-MM-DD
+                if day:
+                    daily[day]["cost"] += r.get("cost_usd", 0) or 0
+                    daily[day]["count"] += 1
+            if daily:
+                df_rows = [
+                    {"תאריך": d, "עלות $": round(v["cost"], 4),
+                     "ניתוחים": v["count"]}
+                    for d, v in sorted(daily.items())
+                ]
+                st.markdown("#### 📅 עלות יומית")
+                st.dataframe(df_rows, use_container_width=True, hide_index=True)
+
+                # Chart
+                try:
+                    import pandas as _pd
+                    chart_df = _pd.DataFrame(df_rows).set_index("תאריך")
+                    st.bar_chart(chart_df["עלות $"])
+                except Exception:
+                    pass
+
+            # By mode
+            st.markdown("#### 🧭 פילוח לפי מצב")
+            mode_rows = [
+                {"מצב": "🔍 שרטוט בודד", "ניתוחים": stats["by_mode"].get("single", 0)},
+                {"מצב": "🧩 מכלולים", "ניתוחים": stats["by_mode"].get("assembly", 0)},
+            ]
+            st.dataframe(mode_rows, use_container_width=True, hide_index=True)
+
+            # By review status
+            st.markdown("#### ✏️ פילוח לפי סטטוס Review")
+            rs = stats["by_review_status"]
+            rs_rows = [
+                {"סטטוס": "✅ אושר", "ניתוחים": rs.get("reviewed", 0)},
+                {"סטטוס": "✏️ נערך", "ניתוחים": rs.get("edited", 0)},
+                {"סטטוס": "⏳ ממתין", "ניתוחים": rs.get("pending", 0)},
+            ]
+            st.dataframe(rs_rows, use_container_width=True, hide_index=True)
+
+    # ═══ TAB 3: ROI ═══
+    with tab_roi:
+        st.markdown("### 📈 חישוב ROI — חיסכון בזמן הנדסה")
+        st.caption(
+            "הנחת בסיס: ניתוח ידני של שרטוט מורכב לחילוץ כל השדות "
+            "(P/N, חומר, תקנים, ציפויים, BOM, אריזה) לוקח 15-30 דקות "
+            "להנדסאי מנוסה."
+        )
+
+        c1, c2 = st.columns(2)
+        with c1:
+            mins_per_drawing = st.slider(
+                "דקות עבודה ידנית לשרטוט",
+                min_value=5, max_value=60, value=20, step=5,
+                key="roi_mins",
+            )
+        with c2:
+            hourly_rate = st.number_input(
+                "עלות שעה ($)",
+                min_value=10, max_value=500, value=80, step=10,
+                key="roi_rate",
+            )
+
+        n = stats["count"]
+        if n > 0:
+            saved_hours = n * mins_per_drawing / 60
+            saved_money = saved_hours * hourly_rate
+            ai_cost = stats["total_cost_usd"]
+            net_savings = saved_money - ai_cost
+            roi_x = saved_money / ai_cost if ai_cost > 0 else float("inf")
+
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("שעות שנחסכו", f"{saved_hours:.1f}")
+            r2.metric("חיסכון בעלות הנדסה", f"${saved_money:,.0f}")
+            r3.metric("עלות AI מצטברת", f"${ai_cost:.2f}")
+            r4.metric(
+                "ROI (חיסכון נטו)",
+                f"${net_savings:,.0f}",
+                delta=f"×{roi_x:.0f}" if ai_cost > 0 else "∞",
+            )
+
+            st.success(
+                f"💡 על {n} ניתוחים: חסכת ~{saved_hours:.0f} שעות הנדסה "
+                f"(~${saved_money:,.0f}), שילמת ${ai_cost:.2f} ל-AI, "
+                f"רווח נטו: ${net_savings:,.0f}."
+            )
+        else:
+            st.info("נצטרך ניתוח אחד לפחות כדי לחשב ROI.")
+
+
+if st.session_state.get("_show_stats_dashboard"):
+    st.session_state["_show_stats_dashboard"] = False
+    _show_stats_dashboard_dialog()
+
+
+# ═══════════════════════════════════════════════════════════════
 # סרגל צד תחתון משותף — מנהל + קבצים שמורים
 # ═══════════════════════════════════════════════════════════════
 def _render_sidebar_footer():
@@ -728,6 +897,11 @@ def _render_sidebar_footer():
                      help="ניהול CAGE codes / aliases / P/N prefixes / spec patterns "
                           "לכל לקוח שלך — נשמר לקובץ customer_mappings.json"):
             st.session_state["_show_customer_manager"] = True
+            st.rerun()
+        if st.button("📊 סטטיסטיקות וניתוחים", use_container_width=True,
+                     key="open_stats_btn",
+                     help="היסטוריית ניתוחים + פילוח עלויות + ROI calculator"):
+            st.session_state["_show_stats_dashboard"] = True
             st.rerun()
 
 
@@ -783,8 +957,36 @@ if not st.session_state.result:
             '<div style="color:#495057; line-height:1.7;">'
             '• חילוץ אוטומטי של P/N, חומר, תקנים, ציפויים, צביעה ובדיקות.<br>'
             '• אזהרות ולידציה אוטומטיות לערכים חשודים (RAL, מותגי צבע, אריזה).<br>'
-            '• ייצוא לדוח PDF, Excel רב-גיליוני או JSON גולמי.'
+            '• Review ידני של שדות מרכזיים לפני ייצוא — שמירה על אמון.<br>'
+            '• ייצוא לדוח HTML (Ctrl+P → Save as PDF), Excel רב-גיליוני או JSON.'
             '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+    with st.expander("🎓 איך זה עובד? (3 שלבים)", expanded=False):
+        st.markdown(
+            """
+            <div dir="rtl" style="text-align:right; line-height:1.8;">
+            <div style="background:#e7f1ff; padding:0.6em 0.9em; border-radius:0.4em;
+                        border-right:4px solid #0d6efd; margin-bottom:0.5em;">
+              <b>1️⃣ העלאה</b> — גררי קובץ PDF של שרטוט הנדסי
+              (עד 20MB, עד 20 עמודים). או לחצי <b>'🎬 טען דוגמה'</b> כדי לראות
+              תוצאה מוכנה ללא Azure.
+            </div>
+            <div style="background:#e7f1ff; padding:0.6em 0.9em; border-radius:0.4em;
+                        border-right:4px solid #0d6efd; margin-bottom:0.5em;">
+              <b>2️⃣ ניתוח אוטומטי (20-40 שניות)</b> — Azure OpenAI
+              מחלץ P/N, drawing number, גרסה, לקוח, חומר, BOM, ציפויים,
+              צביעה, בדיקות, תקנים, הערות ואריזה. ולידציות אוטומטיות מסמנות
+              ערכים חשודים.
+            </div>
+            <div style="background:#e7f1ff; padding:0.6em 0.9em; border-radius:0.4em;
+                        border-right:4px solid #0d6efd;">
+              <b>3️⃣ Review וייצוא</b> — עברי על השדות, תקני אם צריך,
+              ולחצי "אשר תוצאה". אז תוכלי לייצא HTML / Excel / JSON.
+            </div>
+            </div>
+            """,
             unsafe_allow_html=True,
         )
 
@@ -847,6 +1049,20 @@ with st.container(border=True):
                     result = extract_assembly_drawing(temp_path)
                     st.session_state.result = result
                     st.success("✅ ניתוח הושלם")
+                    # log to history (best-effort, silent on failure)
+                    try:
+                        cost = (result.get("_cost_info") or {}).get("total_cost_usd", 0)
+                        append_history(
+                            filename=uploaded_file.name,
+                            mode="single",
+                            part_number=result.get("part_number") or "",
+                            drawing_count=1,
+                            warning_count=len(result.get("_validation_warnings") or []),
+                            cost_usd=cost,
+                            cache_hit=(cost == 0),  # cache hit אם אין עלות
+                        )
+                    except Exception:
+                        logger.warning("history logging failed", exc_info=True)
                 except Exception as e:
                     logger.exception("Drawing extraction failed")
                     level = get_streamlit_level(e)
