@@ -6,6 +6,87 @@
 
 ---
 
+## [Sale-Readiness Sprint] — 25/04/2026
+
+### 📦 Sale-Readiness Documentation
+- **5 מסמכים חדשים** ל-due diligence:
+  - [TECHNICAL_DUE_DILIGENCE.md](TECHNICAL_DUE_DILIGENCE.md) — ארכיטקטורה, סיכונים, מגבלות
+  - [SECURITY.md](SECURITY.md) — מדיניות אבטחה
+  - [DATA_HANDLING.md](DATA_HANDLING.md) — מה נשלח ל-Azure, מה נשמר
+  - [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) — Windows/Linux/Docker setup
+  - [LICENSE_REVIEW.md](LICENSE_REVIEW.md) — 9 תלויות + סיכון PyMuPDF AGPL
+- [SALE_READINESS_RECOMMENDATIONS.md](SALE_READINESS_RECOMMENDATIONS.md) ו-[UX_IMPROVEMENT_RECOMMENDATIONS.md](UX_IMPROVEMENT_RECOMMENDATIONS.md) — roadmaps
+- [IMPROVEMENT_RECOMMENDATIONS.md](docs/archive/IMPROVEMENT_RECOMMENDATIONS_2026-04-25.md) הועבר ל-`docs/archive/`
+
+### 🎨 UX Improvements
+- **Empty state** משופר במסך הראשון עם 4 bullets של ערך
+- **Demo Mode** — `core/demo_data.py` + כפתור "🎬 טען דוגמה" — תוצאת דמו מלאה ללא Azure
+- **Summary Card** — תקציר החלטה בראש המסך עם pills (P/N, DWG, Rev, Customer, Material, Role) + warning chips לפי חומרה + review badge
+- **Review/Edit form** — עריכת 6 שדות סקלריים + standards + packaging לפני export. Status: pending/edited/reviewed. סימון ✏️ לשדות שנערכו. כפתור "✅ אשר תוצאה" — חוסם export עד אישור.
+- **Warnings actionable** — הוספת severity label עברי + "💡 מה לבדוק" hint לכל סוג warning
+- **תצוגה מכונסת** — `_render_drawing_card` בתוך expander במקום גלילה ארוכה
+
+### 👥 Customer Manager UI
+- דיאלוג ניהול לקוחות מלא ב-app.py עם:
+  - selectbox לכל הלקוחות הקיימים + "➕ הוסף לקוח חדש"
+  - טופס לכל 5 השדות (CAGE codes, default CAGE, aliases, P/N prefixes, regex patterns)
+  - דוגמה מלאה לפי לקוח בדיוני "ACME Aerospace Inc."
+  - placeholder text בכל שדה
+  - שמירה/מחיקה/שינוי שם — מעדכן in-place ללא restart
+- `core/_customer_data.py` הורחב ב-CRUD: `reload_mappings`, `save_mappings`, `list_customers`, `get_customer_record`, `empty_customer_record`, `upsert_customer`, `delete_customer`
+- 16 בדיקות חדשות ב-`tests/test_customer_data.py` — round-trip, validation, rename, mutate-in-place
+
+### 🛠️ Code Quality
+- **`pyproject.toml` חדש** עם config של ruff (E/F/I/B/UP/W) + isort עם combine-as-imports
+- **CI ruff עכשיו חוסם** (היה `continue-on-error`)
+- 31 שגיאות ruff תוקנו: imports כפולים, `logger` undefined ב-app.py:606, `zip()` ללא strict, F541 f-strings ריקים, etc.
+- 600+ בדיקות עוברות (היה 405; +210 בעקבות הרחבת suite)
+
+### 📦 Demo Pack
+- `demo_pack/` חדש עם:
+  - **`interactive_demo.html`** — קובץ HTML עצמאי שמדמה את כל ה-flow בשני מצבים. פותח בכל דפדפן, בלי שרת. 1543 שורות, 60KB.
+    - **🔍 Single mode**: Empty state → Load Demo → Summary → Edit → Approve → Export
+    - **🧩 Assembly mode** ⭐: 4 שרטוטים (1 assembly + 3 parts) → Navigator → ניתוח קשרי אבא/בן עם עץ מוצר ויזואלי + Missing Children + 4 טאבי ייצוא
+  - README הסבר על מה עוד להוסיף לחבילה
+- `sample_drawings/` עם README הסבר איך לסניטיזה שרטוטים אמיתיים
+
+### 🔒 Pre-Share Tooling
+- `scripts/prepare_for_sharing.py` — checklist הרצה לפני שיתוף הריפו עם קונה. בודק:
+  - תיקיות נתוני לקוח (draws/, output/, REPORTS/) לא tracked
+  - secrets לא ב-git history
+  - קבצים גדולים tracked
+  - מסמכים נדרשים קיימים (חסר LICENSE — מסומן)
+  - pytest + ruff עוברים
+  - מציג נפח של תיקיות מקומיות לניקוי ידני
+
+### ⚖️ AGPL Eliminated — Reports migrated to HTML
+**הבעיה הקודמת:** PyMuPDF (fitz) הוא AGPL 3.0 / Commercial — סיכון לקונה שמתכנן SaaS / סגור-מקור.
+
+**הפתרון:** הדוחות הוחלפו מ-PDF ל-**HTML עצמאי**:
+- `core/pdf_utils.py` (קלט) השתמש ב-`pypdfium2` (Apache 2.0) — נשאר כמו שהוא ✅
+- `storage/pdf_report.py` (פלט) — **`import fitz` הוסר לחלוטין**:
+  - `build_assembly_pdf` → `build_assembly_html` (alias נשמר ל-backwards compat)
+  - `build_tree_pdf` → `build_tree_html` (alias נשמר)
+  - הקבצים נשמרים כ-`.html` במקום `.pdf`
+- `_wrap_full_html_report()` חדש — עוטף את כל הסקציות ב-`<!DOCTYPE html>` עם:
+  - `@page { size: A4; margin: 1.5cm; }` להדפסה איכותית
+  - `@media print` rules שמסתיר את כפתור ההדפסה ומפרק לעמודים
+  - כפתור "🖨️ הדפסה / שמירה כ-PDF" בראש העמוד
+  - RTL native + Hebrew dir + meta charset utf-8
+- `requirements.txt` — `pymupdf` הוסר לחלוטין
+- ה-UI: tab "📕 PDF מלא" → "📄 דוח HTML" בשני המצבים (Single + Assembly)
+
+**איך הקונה מקבל PDF?** פותח את ה-HTML בדפדפן → Ctrl+P → "Save as PDF". הדפדפן עושה את ההמרה בחינם, איכות מושלמת.
+
+**יתרונות שולים:**
+- searchable text · mobile-friendly · קובץ קטן יותר · קל לדבג
+
+**תוצאה:** **0 AGPL בסטאק. כל התלויות Apache 2.0 / MIT / BSD.** קונה לא צריך לקנות שום רישיון.
+
+15 בדיקות חדשות ב-[tests/test_pdf_report_optional.py](tests/test_pdf_report_optional.py) — HTML structure, RTL, content, print CSS, Excel regression, backwards-compat aliases, no fitz import. [LICENSE_REVIEW.md](LICENSE_REVIEW.md) עודכן עם טבלת השוואת חלופות.
+
+---
+
 ## [Unreleased] — 25/04/2026
 
 ### 🔥 Major Refactor (ריפקטור גדול!)

@@ -3,7 +3,7 @@
 > אפליקציית Streamlit לחילוץ אוטומטי של מידע משרטוטים הנדסיים (PDF) באמצעות
 > Azure OpenAI Vision / Reasoning. תומכת בשני מצבי עבודה: **שרטוט בודד** עם
 > התאמה למאגר מאסטרים, ו-**מכלולים מרובים** עם ניתוח קשרי אבא/בן בין השרטוטים
-> והפקת דוח PDF מסכם.
+> והפקת דוח HTML מסכם (ניתן לשמירה כ-PDF דרך הדפדפן).
 
 ---
 
@@ -44,10 +44,10 @@
 |------|-----------|
 | UI | **Streamlit** ≥ 1.30 (RTL, dialogs, multi-file upload) |
 | AI | **Azure OpenAI** — `gpt-4o` (Vision) או `gpt-5.4` (Reasoning) |
-| PDF → Image | **PyMuPDF** (fitz) ב-DPI 300 |
+| PDF → Image | **pypdfium2** (Apache 2.0, מבוסס Chromium PDFium) ב-DPI 300 |
 | OCR Fallback | **pytesseract** (אופציונלי) |
 | Excel | **pandas** + **openpyxl** |
-| PDF Report | **PyMuPDF Story / DocumentWriter** עם RTL בעברית |
+| HTML Report | template strings + RTL CSS (Ctrl+P → Save as PDF דרך הדפדפן) |
 | Python | 3.13 (תיבת `.venv` מקומית) |
 
 ---
@@ -211,7 +211,7 @@ DRAWING_CACHE_DISABLED=false
 - כפתור **"נתח קשרי אבא/בן"** מפעיל קריאת AI נפרדת על כל הנתונים
   (משתמש בתמונת המכלול כמפה מבנית אם זמינה).
 - שלושה דוחות זמינים להורדה:
-  - **📕 דוח PDF מלא** — כל השדות לכל שרטוט + קשרים.
+  - **📄 דוח HTML מלא** — כל השדות לכל שרטוט + קשרים (פותחים בדפדפן · Ctrl+P → Save as PDF).
   - **🌳 דוח עץ מוצר (PDF מקוצר)** — טבלה + סכמה ויזואלית.
    - **📊 עץ מוצר ל-Excel** — גיליון `Tree` עם רמה/אב ישיר/PN/Drawing/תיאור/כמות/חומר/נתיב.
    - **🧭 גיליון `OverviewImage` / `עץ מתמונה`** — פריטי Exploded View מופרדים מעץ המוצר האמיתי.
@@ -232,7 +232,7 @@ PDF
  │
  ├─► Cache lookup (MD5 + model + pipeline version) ──► HIT? החזר תוצאה
  │
- ├─► PyMuPDF: pdf_to_images(dpi=300) ──► [JPEG base64]
+ ├─► pypdfium2: pdf_to_images(dpi=300) ──► [JPEG base64]
  │
  ├─► Stage 1 (Vision): basic info
  │     • part_number, revision, drawing_number, customer, material
@@ -299,7 +299,7 @@ PDF
 ```
 
 ייצוא הדוח דרך [storage/pdf_report.py](storage/pdf_report.py) משתמש ב-
-`fitz.DocumentWriter` + `fitz.Story` עם HTML/CSS RTL לעברית.
+template strings עם HTML/CSS RTL לעברית. הקובץ HTML עצמאי — נפתח בכל דפדפן וניתן לשמירה כ-PDF דרך Ctrl+P.
 
 ---
 
@@ -387,7 +387,7 @@ PDF
 | קובץ | תפקיד |
 |------|-------|
 | [storage/save_handler.py](storage/save_handler.py) | שמירה ל-JSON / Excel |
-| [storage/pdf_report.py](storage/pdf_report.py) | דוח PDF עברי (RTL, HTML/CSS, Story API) |
+| [storage/pdf_report.py](storage/pdf_report.py) | דוח HTML עברי (RTL, @page A4, Print bar) — שם הקובץ נשמר היסטורית. Backwards-compat: `build_assembly_pdf` = `build_assembly_html` alias. |
 
 ---
 
@@ -400,7 +400,7 @@ PDF
 | `<basename>_<timestamp>.json` | תוצאת ניתוח של שרטוט בודד |
 | `<basename>_<timestamp>.xlsx` | Excel רב-גיליוני: Summary / Coatings / Paintings / Master_Matches / Standards / Warnings |
 | `_assembly_<timestamp>.json` | תוצאת ניתוח מכלול (כל הDrawings + relationships) |
-| `_assembly_report_<timestamp>.pdf` | דוח PDF מלא של מכלול |
+| `_assembly_report_<timestamp>.html` | דוח HTML מלא של מכלול (פותחים בדפדפן · Ctrl+P → Save as PDF) |
 | `_assembly_tree_<timestamp>.pdf` | דוח עץ מוצר מקוצר (טבלה + סכמה) |
 | `_assembly_tree_<timestamp>.xlsx` | עץ מוצר ל-Excel (גיליון `Tree`) |
 | `costs.jsonl` | לוג מצטבר של עלויות AI (שורה לשרטוט) |

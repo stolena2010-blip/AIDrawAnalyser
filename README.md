@@ -29,8 +29,8 @@
   - `כמות לפי BOM` / `תיאור BOM` נשמרים כשיש התאמת BOM, גם אם אין שרטוט קיים
   - ללא ניחוש קישורים: עמודת `נמצא בקבצים?` מסמנת רק `כן/לא` לפי קבצים אמיתיים
 - ייצוא:
-  - 📕 דוח PDF מלא (RTL עברית)
-  - 🌳 דוח עץ מוצר מקוצר (טבלה + סכמה ויזואלית)
+  - 📄 דוח HTML מלא (RTL עברית · Ctrl+P → Save as PDF)
+  - 🌳 דוח עץ מוצר מקוצר ב-HTML (טבלה + סכמה ויזואלית)
   - 📊 עץ מוצר ל-Excel (כולל עמודות אב ישיר/נתיב)
   - 🧭 גיליון נפרד לעץ מהתמונה (ללא ערבוב עם עץ מוצר אמיתי)
   - 💾 JSON מאוחד
@@ -140,5 +140,17 @@ AIDrawAnalyser/
 └── CHANGELOG.md               ← שינויים אחרונים
 ```
 
-ראה [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) לסקירה טכנית מלאה.
+## תיעוד נוסף
+
+### למפתחים
+- [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) — סקירה טכנית מלאה של ה-pipeline
+- [CHANGELOG.md](CHANGELOG.md) — שינויים אחרונים
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) — התקנה במחשב חדש
+
+### למכירה / Due Diligence
+- [SALE_READINESS_RECOMMENDATIONS.md](SALE_READINESS_RECOMMENDATIONS.md) — Roadmap להכנה למכירה
+- [TECHNICAL_DUE_DILIGENCE.md](TECHNICAL_DUE_DILIGENCE.md) — סקירת ארכיטקטורה, סיכונים ומגבלות
+- [SECURITY.md](SECURITY.md) — מדיניות אבטחה
+- [DATA_HANDLING.md](DATA_HANDLING.md) — מה נשלח ל-Azure / נשמר מקומית
+- [LICENSE_REVIEW.md](LICENSE_REVIEW.md) — תלויות ורישיונות (כולן Apache 2.0 / MIT / BSD — אין AGPL)
 

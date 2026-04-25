@@ -26,6 +26,7 @@ output/*.txt
 output/*.jsonl
 output/*.pdf
 output/*.csv
+output/*.html
 output/.cache/
 output/_runtime_settings.json
 !output/.gitkeep
@@ -35,6 +36,17 @@ draws/
 
 # User reports folder (local experiments — often confidential drawings)
 REPORTS/
+
+# Demo pack contents (only README + HTML demo tracked; binary outputs are local)
+demo_pack/*
+!demo_pack/.gitkeep
+!demo_pack/README.md
+!demo_pack/interactive_demo.html
+
+# Sample drawings — only tracked content is the README explaining how to populate
+sample_drawings/*
+!sample_drawings/.gitkeep
+!sample_drawings/README.md
 
 # Backup files
 *.bak

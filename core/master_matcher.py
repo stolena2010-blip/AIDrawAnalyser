@@ -35,11 +35,11 @@ def _get_masters_path() -> Path:
             return Path(custom_path).resolve()
     except (ImportError, Exception):
         pass
-    
+
     env_path = os.getenv("MASTERS_XLSX_PATH", "").strip()
     if env_path:
         return Path(env_path).resolve()
-    
+
     return Path(__file__).resolve().parent.parent / "Masters.xlsx"
 
 MASTERS_PATH = _get_masters_path()

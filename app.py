@@ -11,27 +11,40 @@ import streamlit as st
 
 from core.assembly import extract_assembly_drawing
 from core.azure_client import (
-    get_deployment, is_reasoning_model, 
+    MODEL_GPT_4O,
+    MODEL_GPT_5_4,
+    SUPPORTED_MODELS,
+    _active_model,
+    enabled_modes,
+    get_deployment,
+    is_fallback_enabled,
+    is_reasoning_model,
     save_runtime_settings,
-    is_fallback_enabled, enabled_modes, SUPPORTED_MODELS,
-    MODEL_GPT_4O, MODEL_GPT_5_4
 )
 from core.cost_tracker import get_aggregate_stats
-from core.ocr_fallback import is_ocr_available
+from core.demo_data import DEMO_FILENAME, get_demo_result, is_demo_result
 from core.exceptions import format_error_for_ui, get_streamlit_level
+from core.ocr_fallback import is_ocr_available
+from storage.pdf_report import (
+    build_assembly_excel,
+    build_assembly_html,
+)
 from storage.save_handler import save_to_json
-from storage.pdf_report import build_assembly_pdf, build_assembly_excel
 from ui_assembly import (
+    _get_review_status,
     _render_drawing_card,
-    _render_validation_warnings as _asm_render_validation_warnings,
-    _render_stage_model_feedback as _asm_render_stage_model_feedback,
     _render_export_pair,
+    _render_stage_model_feedback as _asm_render_stage_model_feedback,
+    _render_validation_warnings as _asm_render_validation_warnings,
+    render_review_edit_form,
+    render_summary_card,
 )
 
 # ═══════════════════════════════════════════════════════════════
 # הגדרות
 # ═══════════════════════════════════════════════════════════════
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="AIDrawAnalyser",
@@ -231,11 +244,6 @@ st.markdown(
 # ═══════════════════════════════════════════════════════════════
 # סיידבר — מצב עבודה, הגדרות, מנהל, אודות
 # ═══════════════════════════════════════════════════════════════
-from core.azure_client import (
-    MODEL_GPT_4O, MODEL_GPT_5_4, SUPPORTED_MODELS,
-    _active_model, is_fallback_enabled, save_runtime_settings, enabled_modes,
-)
-
 with st.sidebar:
     # ─── בורר מצב עבודה ───
     st.markdown("### 🧭 מצב עבודה")
@@ -477,7 +485,10 @@ def _show_admin_cost_panel():
     st.divider()
     st.markdown("#### 🗄️ ניהול Cache")
     from core.drawing_cache import (
-        cache_stats, clear_cache, cleanup_stale_cache, CACHE_VERSION,
+        CACHE_VERSION,
+        cache_stats,
+        cleanup_stale_cache,
+        clear_cache,
     )
     _stats = cache_stats()
     cs1, cs2, cs3 = st.columns(3)
@@ -509,6 +520,198 @@ if st.session_state.get("_show_admin"):
     st.session_state["_show_admin"] = False
     _show_admin_cost_panel()
 
+
+# ═══════════════════════════════════════════════════════════════
+# פאנל ניהול לקוחות — CRUD ל-customer_mappings.json
+# ═══════════════════════════════════════════════════════════════
+@st.dialog("👥 ניהול לקוחות", width="large")
+def _show_customer_manager_dialog():
+    """ניהול CAGE / aliases / P/N prefixes / spec patterns לכל לקוח —
+    בלי לערוך JSON ידנית ובלי restart לאפליקציה."""
+    from core._customer_data import (
+        delete_customer,
+        empty_customer_record,
+        get_customer_record,
+        list_customers,
+        upsert_customer,
+    )
+
+    st.info(
+        "💡 **חשוב לדעת:** הרשימה הזו היא **עוזר** — לא חובה. "
+        "האפליקציה תעבוד גם בלי שום לקוח מוגדר. "
+        "כל לקוח שמוגדר משפר דיוק ב-3 דרכים: השלמת שם לקוח מקוד CAGE, "
+        "נירמול ואריאציות שמות, וזיהוי תקנים פנימיים של הלקוח כדי לא לסמן "
+        "אותם כהזיה. **אין הגבלה על מספר לקוחות.**"
+    )
+
+    # ─── עזרה ודוגמה מלאה ───
+    with st.expander("📖 איך למלא? דוגמה מלאה", expanded=False):
+        st.markdown("""
+**דוגמה — לקוח בדיוני "ACME Aerospace Inc.":**
+
+| שדה | ערך לדוגמה | מתי משמש |
+|---|---|---|
+| **שם קנוני** | `ACME Aerospace Inc.` | מופיע ככה בדוחות PDF/Excel |
+| **קודי CAGE** | `AC001` ⏎ `AC002` (שורה לקוד) | אם השרטוט מציג רק "CAGE: AC001" → המערכת תשלים customer ל-"ACME Aerospace Inc." |
+| **CAGE ברירת מחדל** | `AC001` | הקוד הנפוץ — משמש כשיש customer אבל אין CAGE |
+| **Aliases (ואריאציות)** | `ACME` ⏎ `ACME AEROSPACE` ⏎ `ACME AEROSPACE INC` | אם המודל קורא "ACME" — נירמול ל-"ACME Aerospace Inc." |
+| **קידומות P/N** | `AC` ⏎ `ACR` | אם P/N מתחיל ב-"AC-12345" → המערכת מסיקה שזה ACME |
+| **Spec patterns** | `^AC-\\d{4}` ⏎ `^ACR-[A-Z]{2}\\d+` | תקנים פנימיים של הלקוח — לא יסומנו כ"הזיית תקן" |
+
+**הערות:**
+- **כל השדות אופציונליים** חוץ משם.
+- ערכים יישמרו ב-uppercase אוטומטית (חוץ מ-spec patterns).
+- ה-Spec patterns הם Python regex רגילים — `\\d` = ספרה, `[A-Z]` = אות גדולה, `^` = תחילת המחרוזת.
+- Aliases — מומלץ לכתוב בלי פיסוק (לא "Acme, Inc." אלא "ACME INC").
+""")
+
+    customers = list_customers()
+    new_option = "➕ הוסף לקוח חדש"
+    options = [new_option, *customers]
+
+    selected = st.selectbox(
+        f"בחרי לקוח לעריכה ({len(customers)} מוגדרים · אין הגבלה על הוספה)",
+        options=options,
+        key="cm_selected",
+    )
+
+    is_new = selected == new_option
+    if is_new:
+        record = empty_customer_record()
+        original_name = None
+    else:
+        record = get_customer_record(selected)
+        original_name = selected
+
+    # ─── טופס עריכה ───
+    with st.form(key="cm_form", border=True):
+        st.markdown("#### 📝 פרטי לקוח")
+        if is_new:
+            st.caption(
+                "💬 ממלאים את השדות לפי הדוגמה למעלה. שם הלקוח חובה — השאר אופציונלי."
+            )
+
+        new_name = st.text_input(
+            "שם קנוני של הלקוח (חובה — יופיע בדוחות) *",
+            value=record.get("name", ""),
+            key="cm_name",
+            placeholder="ACME Aerospace Inc.",
+            help="שם רשמי כפי שתרצי שיופיע בדוחות. למשל: 'ACME Aerospace Inc.'",
+        )
+
+        col_cage, col_default = st.columns([2, 1])
+        with col_cage:
+            cage_codes_str = st.text_area(
+                "קודי CAGE (אופציונלי — אחד בשורה, 3-6 תווים אלפאנומריים)",
+                value="\n".join(record.get("cage_codes", [])),
+                key="cm_cages",
+                height=110,
+                placeholder="AC001\nAC002\nAC003",
+                help="קוד CAGE רשמי של הלקוח. לדוגמה: 1931 (RAFAEL), 0772A (Elop).",
+            )
+        with col_default:
+            default_cage = st.text_input(
+                "CAGE ברירת מחדל (אופציונלי)",
+                value=record.get("default_cage", ""),
+                key="cm_default_cage",
+                placeholder="AC001",
+                help="ה-CAGE הנפוץ ביותר של הלקוח. משמש כש-customer ידוע אבל CAGE חסר.",
+            )
+
+        aliases_str = st.text_area(
+            "ואריאציות / aliases (אופציונלי — אחד בשורה, באותיות גדולות בלי פיסוק)",
+            value="\n".join(record.get("aliases", [])),
+            key="cm_aliases",
+            height=90,
+            placeholder="ACME\nACME AEROSPACE\nACME AEROSPACE INC",
+            help=(
+                "שמות שונים שהמודל עלול להחזיר ושצריכים לתרגם לשם הקנוני. "
+                "למשל: 'RAFAEL' → 'RAFAEL Advanced Defense Systems Ltd.'."
+            ),
+        )
+
+        prefixes_str = st.text_area(
+            "קידומות P/N (אופציונלי — אחד בשורה)",
+            value="\n".join(record.get("pn_prefixes", [])),
+            key="cm_prefixes",
+            height=90,
+            placeholder="AC\nACR",
+            help=(
+                "אם P/N מתחיל באחת הקידומות האלה — נחשב כשייך ללקוח. "
+                "לדוגמה: BAS = BIRD Aerosystems."
+            ),
+        )
+
+        patterns_str = st.text_area(
+            "Regex patterns לתקנים פנימיים (אופציונלי — אחד בשורה, Python regex)",
+            value="\n".join(record.get("spec_patterns", [])),
+            key="cm_patterns",
+            height=90,
+            placeholder=r"^AC-\d{4}" + "\n" + r"^ACR-[A-Z]{2}\d+",
+            help=(
+                "תקנים שהמודל יכול לזהות שלא בטעות (לא הזיה). "
+                r"למשל: '^I-\d{5,7}' לתקן פנימי של KRETOS. "
+                "כל שורה היא Python regex (\\d=ספרה, [A-Z]=אות גדולה, ^=תחילה)."
+            ),
+        )
+
+        col_save, col_del, col_cancel = st.columns([1, 1, 1])
+        with col_save:
+            submit_save = st.form_submit_button(
+                "💾 שמור",
+                use_container_width=True,
+                type="primary",
+            )
+        with col_del:
+            submit_del = st.form_submit_button(
+                "🗑️ מחק לקוח" if not is_new else "מחק (לא זמין)",
+                use_container_width=True,
+                disabled=is_new,
+            )
+        with col_cancel:
+            submit_cancel = st.form_submit_button(
+                "❌ סגור בלי שינוי",
+                use_container_width=True,
+            )
+
+    # ─── טיפול בלחיצות ───
+    if submit_cancel:
+        st.rerun()
+
+    if submit_save:
+        new_record = {
+            "name": new_name,
+            "cage_codes": [s.strip() for s in cage_codes_str.splitlines() if s.strip()],
+            "default_cage": default_cage,
+            "aliases": [s.strip() for s in aliases_str.splitlines() if s.strip()],
+            "pn_prefixes": [s.strip() for s in prefixes_str.splitlines() if s.strip()],
+            "spec_patterns": [
+                s.strip() for s in patterns_str.splitlines() if s.strip()
+            ],
+        }
+        try:
+            upsert_customer(new_record, original_name=original_name)
+            st.success(f"✅ נשמר: {new_name}")
+            st.session_state["cm_selected"] = new_name
+            st.rerun()
+        except (ValueError, TypeError, KeyError) as exc:
+            st.error(f"❌ שגיאת ולידציה: {exc}")
+
+    if submit_del and not is_new:
+        try:
+            delete_customer(original_name)
+            st.success(f"🗑️ נמחק: {original_name}")
+            st.session_state["cm_selected"] = new_option
+            st.rerun()
+        except (ValueError, TypeError, KeyError) as exc:
+            st.error(f"❌ שגיאה במחיקה: {exc}")
+
+
+if st.session_state.get("_show_customer_manager"):
+    st.session_state["_show_customer_manager"] = False
+    _show_customer_manager_dialog()
+
+
 # ═══════════════════════════════════════════════════════════════
 # סרגל צד תחתון משותף — מנהל + קבצים שמורים
 # ═══════════════════════════════════════════════════════════════
@@ -519,6 +722,12 @@ def _render_sidebar_footer():
         if st.button("🛠️ פתח פאנל מנהל", use_container_width=True,
                      key="open_admin_btn"):
             st.session_state["_show_admin"] = True
+            st.rerun()
+        if st.button("👥 ניהול לקוחות", use_container_width=True,
+                     key="open_customer_manager_btn",
+                     help="ניהול CAGE codes / aliases / P/N prefixes / spec patterns "
+                          "לכל לקוח שלך — נשמר לקובץ customer_mappings.json"):
+            st.session_state["_show_customer_manager"] = True
             st.rerun()
 
 
@@ -563,6 +772,23 @@ if "filename" not in st.session_state:
     st.session_state.filename = None
 
 # ─────────────────────────────────────
+# Empty state — מסך הסבר לפני שיש תוצאה
+# ─────────────────────────────────────
+if not st.session_state.result:
+    with st.container(border=True):
+        st.markdown(
+            '<div dir="rtl" style="text-align:right;">'
+            '<div style="font-size:1.25em; font-weight:700; color:#0d6efd; '
+            'margin-bottom:0.4em;">נתחי שרטוט PDF והפיקי דוח ייצור</div>'
+            '<div style="color:#495057; line-height:1.7;">'
+            '• חילוץ אוטומטי של P/N, חומר, תקנים, ציפויים, צביעה ובדיקות.<br>'
+            '• אזהרות ולידציה אוטומטיות לערכים חשודים (RAL, מותגי צבע, אריזה).<br>'
+            '• ייצוא לדוח PDF, Excel רב-גיליוני או JSON גולמי.'
+            '</div></div>',
+            unsafe_allow_html=True,
+        )
+
+# ─────────────────────────────────────
 # העלאת קובץ + אפשרויות
 # ─────────────────────────────────────
 st.markdown("### 1️⃣ העלה שרטוט PDF")
@@ -587,6 +813,25 @@ with st.container(border=True):
         )
         if not is_ocr_available():
             st.caption("⚠️ Tesseract לא מותקן")
+
+    # ─── Demo Mode — מציג תוצאה לדוגמה ללא קריאה ל-Azure ───
+    if not st.session_state.result:
+        st.divider()
+        col_demo_btn, col_demo_caption = st.columns([1, 2])
+        with col_demo_btn:
+            if st.button("🎬 טען דוגמה", use_container_width=True,
+                         key="load_demo_single",
+                         help="טוען תוצאת ניתוח שמורה — בלי קריאה ל-Azure ובלי קובץ אמיתי"):
+                st.session_state.result = get_demo_result()
+                st.session_state.filename = DEMO_FILENAME
+                for k in ("single_html_path", "single_xlsx_path", "single_json_path"):
+                    st.session_state.pop(k, None)
+                st.rerun()
+        with col_demo_caption:
+            st.caption(
+                "אין לך עדיין שרטוט להעלות? לחצי 'טען דוגמה' "
+                "כדי לראות איך נראית תוצאה מלאה (פריט ACME-12345)."
+            )
 
     if uploaded_file is not None:
         temp_path = OUTPUT_DIR / f"_temp_{uploaded_file.name}"
@@ -627,8 +872,12 @@ if st.session_state.result:
 
     st.markdown("### 2️⃣ תוצאות הניתוח")
 
-    # ─── תצוגה מלאה (זהה למצב 'מכלולים מרובים') ───
-    _render_drawing_card(r)
+    # ─── תקציר החלטה בראש המסך ───
+    render_summary_card(r, demo=is_demo_result(r))
+
+    # ─── תצוגה מלאה (פירוט) ───
+    with st.expander("📋 פירוט מלא", expanded=True):
+        _render_drawing_card(r)
     _asm_render_validation_warnings(r)
     _asm_render_stage_model_feedback(
         cost_info,
@@ -637,61 +886,86 @@ if st.session_state.result:
     )
 
     # ─────────────────────────────────────
-    # שמירה — דוחות וייצוא
+    # 2.5 — Review / Edit לפני export
     # ─────────────────────────────────────
     st.divider()
-    st.markdown("### 3️⃣ שמור תוצאה")
+    st.markdown("### 3️⃣ Review ואישור")
+    render_review_edit_form(r, key_prefix="single_review")
+
+    # ─────────────────────────────────────
+    # שמירה — דוחות וייצוא (חסום עד אישור)
+    # ─────────────────────────────────────
+    st.divider()
+    _approved = _get_review_status(r) == "reviewed"
+    st.markdown("### 4️⃣ שמור תוצאה")
+    if not _approved:
+        st.warning(
+            "⏳ הייצוא ייפתח אחרי אישור התוצאה למעלה. "
+            "אם אין צורך בעריכה — לחצי 'אשר תוצאה לייצוא'."
+        )
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = Path(st.session_state.filename).stem
     single_list = [r]  # build_assembly_* עובדים עם list, גם לשרטוט בודד
 
-    with st.expander("📦 הורדת קבצים (PDF / Excel / JSON)", expanded=True):
-        tab_pdf, tab_xlsx, tab_json = st.tabs([
-            "📕 PDF מלא",
+    with st.expander("📦 הורדת קבצים (HTML / Excel / JSON)", expanded=_approved):
+        if not _approved:
+            st.caption("🔒 חסום עד אישור התוצאה למעלה.")
+        tab_html, tab_xlsx, tab_json = st.tabs([
+            "📄 דוח HTML",
             "📊 Excel מלא",
             "💾 JSON גולמי",
         ])
 
-        with tab_pdf:
-            st.caption("דוח PDF מקיף: כותרת עם P/N ולקוח, חומר, תהליכים, "
-                       "ציפויים/צביעה, בדיקות, תקנים, NOTES.")
-            _render_export_pair(
-                button_label="📕 צור דוח PDF מלא",
-                spinner_text="📄 מייצר דוח PDF...",
-                build_fn=lambda p: build_assembly_pdf(
-                    single_list, None, p, single_mode=True
-                ),
-                out_path=OUTPUT_DIR / f"{base_name}_{timestamp}.pdf",
-                state_key="single_pdf_path",
-                mime="application/pdf",
-                btn_key="btn_single_pdf",
-                dl_key="dl_single_pdf",
-                err_label="PDF",
+        with tab_html:
+            st.caption(
+                "דוח HTML מקיף: כותרת עם P/N ולקוח, חומר, תהליכים, "
+                "ציפויים/צביעה, בדיקות, תקנים, NOTES. "
+                "💡 לפתיחה — כפילי קליק על הקובץ. ל-PDF — בדפדפן Ctrl+P → 'Save as PDF'."
             )
+            if not _approved:
+                st.info("⏳ אישרי את התוצאה למעלה כדי לפתוח ייצוא HTML.")
+            else:
+                _render_export_pair(
+                    button_label="📄 צור דוח HTML",
+                    spinner_text="📄 מייצר דוח HTML...",
+                    build_fn=lambda p: build_assembly_html(
+                        single_list, None, p, single_mode=True
+                    ),
+                    out_path=OUTPUT_DIR / f"{base_name}_{timestamp}.html",
+                    state_key="single_html_path",
+                    mime="text/html",
+                    btn_key="btn_single_html",
+                    dl_key="dl_single_html",
+                    err_label="HTML",
+                )
 
         with tab_xlsx:
             st.caption("Excel רב-גיליונות: סיכום, BOM, עיבוד שבבי, ריתוך, "
                        "טיפול חום, ציפויים, צביעה, NDT, בדיקות, אישור סופי, "
                        "תקנים, תהליכים נוספים, עלויות.")
-            _render_export_pair(
-                button_label="📊 צור Excel מלא",
-                spinner_text="📄 מייצר Excel...",
-                build_fn=lambda p: build_assembly_excel(
-                    single_list, None, p, single_mode=True
-                ),
-                out_path=OUTPUT_DIR / f"{base_name}_{timestamp}.xlsx",
-                state_key="single_xlsx_path",
-                mime="application/vnd.openxmlformats-officedocument."
-                     "spreadsheetml.sheet",
-                btn_key="btn_single_xlsx",
-                dl_key="dl_single_xlsx",
-                err_label="Excel",
-            )
+            if not _approved:
+                st.info("⏳ אישרי את התוצאה למעלה כדי לפתוח ייצוא Excel.")
+            else:
+                _render_export_pair(
+                    button_label="📊 צור Excel מלא",
+                    spinner_text="📄 מייצר Excel...",
+                    build_fn=lambda p: build_assembly_excel(
+                        single_list, None, p, single_mode=True
+                    ),
+                    out_path=OUTPUT_DIR / f"{base_name}_{timestamp}.xlsx",
+                    state_key="single_xlsx_path",
+                    mime="application/vnd.openxmlformats-officedocument."
+                         "spreadsheetml.sheet",
+                    btn_key="btn_single_xlsx",
+                    dl_key="dl_single_xlsx",
+                    err_label="Excel",
+                )
 
         with tab_json:
             st.caption("מבנה נתונים גולמי של הניתוח — מתאים לאינטגרציה, "
-                       "debugging, או ייצוא ידני.")
+                       "debugging, או ייצוא ידני. JSON לא דורש אישור — "
+                       "תמיד זמין למפתחים.")
             if st.button("💾 שמור JSON", use_container_width=True,
                          key="btn_single_json"):
                 path = save_to_json(
@@ -717,7 +991,7 @@ if st.session_state.result:
         st.session_state.result = None
         st.session_state.filename = None
         # נקה נתיבי ייצוא כדי למנוע הצגת כפתור הורדה של שרטוט קודם
-        for k in ("single_pdf_path", "single_xlsx_path", "single_json_path"):
+        for k in ("single_html_path", "single_xlsx_path", "single_json_path"):
             st.session_state.pop(k, None)
         st.rerun()
 

@@ -6,7 +6,6 @@
 """
 from __future__ import annotations
 
-
 SCENARIOS: dict[str, dict] = {
     # ─────────────────────────────────────────────────────────────
     # 1. RAFAEL drawing — OCR confusion 8↔B ב-PN, צריך תיקון משם הקובץ

@@ -1,8 +1,13 @@
 """
-יצירת דוח PDF למצב 'מכלולים מרובים'.
+יצירת דוחות HTML למצב 'מכלולים מרובים' ו'שרטוט בודד'.
 
-משתמש ב-PyMuPDF (fitz) ובפונקציה insert_htmlbox התומכת ב-HTML/CSS
-ובכיווניות RTL — מאפשרת רינדור עברית באופן אמין.
+🆓 License: pure Python stdlib + openpyxl/pandas (MIT/BSD) — אין AGPL.
+   הדוחות הם **HTML עצמאי** שנפתח בכל דפדפן. הקונה יכול:
+     • לפתוח בדפדפן ולקרוא
+     • Ctrl+P → "Save as PDF" כדי לקבל PDF (הדפדפן עושה את העבודה)
+     • לשלוח כ-attachment במייל
+     • לפתוח במובייל (responsive)
+   זה מחליף את הדור הקודם שהשתמש ב-PyMuPDF (AGPL/Commercial).
 
 הדוח כולל:
   • שער עם תאריך + מספר שרטוטים
@@ -10,6 +15,8 @@
   • טבלת מכלולים (אבא/בן/כמויות) + יתומים + חלקים חסרים
   • כרטיס מפורט לכל שרטוט: מזהים, BOM, עיבוד שבבי, ציפויים, צביעות,
     בדיקות, אישורים, אריזה, תקנים, הערות.
+
+ייצוא Excel (build_assembly_excel, build_tree_excel) זמין כתמיד.
 """
 from __future__ import annotations
 
@@ -17,8 +24,6 @@ import html
 import re
 from datetime import datetime
 from pathlib import Path
-
-import fitz  # PyMuPDF
 
 
 # ─── עזרים ───
@@ -120,6 +125,149 @@ def _wrap_rtl(inner_html: str) -> str:
         + 'unicode-bidi:plaintext;">'
         + inner_html
         + "</body></html>"
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  HTML report wrapping — replaces the old fitz-based PDF generation.
+#  הדוח נפתח בדפדפן; הקונה יכול Ctrl+P → "Save as PDF" כדי לקבל PDF.
+# ═══════════════════════════════════════════════════════════════════
+
+# CSS שמיועד גם למסך וגם להדפסה. @page גורם ל-A4 בעת הדפסה,
+# .no-print מסתיר את כפתור ההדפסה כשמדפיסים.
+_REPORT_CSS_EXTRA = """
+@page {
+  size: A4;
+  margin: 1.5cm;
+}
+
+@media print {
+  .no-print { display: none !important; }
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+  .report-container {
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    background: white !important;
+  }
+  .page-break {
+    page-break-before: always;
+    border: none;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+@media screen {
+  body {
+    background: #f5f5f5;
+    margin: 1.5em auto;
+    padding: 0 1em;
+    max-width: 900px;
+    min-height: 100vh;
+  }
+  .report-container {
+    background: white;
+    padding: 2em 2.5em;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    border-radius: 8px;
+    margin-bottom: 2em;
+  }
+  .page-break {
+    border-top: 2px dashed #dee2e6;
+    margin: 2em 0 1.5em 0;
+    padding-top: 0;
+    font-size: 0.75em;
+    color: #adb5bd;
+    text-align: center;
+  }
+  .page-break::before {
+    content: "— עמוד חדש בהדפסה —";
+    background: #f5f5f5;
+    padding: 0 1em;
+    position: relative;
+    top: -0.7em;
+  }
+}
+
+.print-bar {
+  position: sticky;
+  top: 0;
+  background: #0d6efd;
+  color: white;
+  padding: 0.7em 1em;
+  margin: 0 0 1em 0;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  z-index: 100;
+}
+.print-bar .print-info { font-size: 0.9em; opacity: 0.95; }
+.print-bar button {
+  background: white;
+  color: #0d6efd;
+  border: none;
+  padding: 0.5em 1.2em;
+  border-radius: 4px;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 1em;
+  font-family: inherit;
+}
+.print-bar button:hover { background: #e7f1ff; }
+"""
+
+
+_PRINT_BAR_HTML = """
+<div class="print-bar no-print">
+  <div class="print-info">
+    💡 לשמירת PDF: לחצי על הכפתור ⬅️ או Ctrl+P ובחרי "Save as PDF"
+  </div>
+  <button onclick="window.print()">🖨️ הדפסה / שמירה כ-PDF</button>
+</div>
+"""
+
+
+def _wrap_full_html_report(
+    sections: list[str], title: str, extra_css: str = ""
+) -> str:
+    """עוטף רשימת סקציות בדוח HTML מלא + RTL + print-friendly CSS.
+
+    הסקציה הראשונה מתחילה ישר; כל סקציה אחריה תקבל page-break-before בהדפסה
+    (במסך — קו מקווקו עם תווית "עמוד חדש").
+
+    extra_css: CSS נוסף ספציפי לדוח (למשל סטיילים של עץ).
+    """
+    body_parts: list[str] = []
+    for i, section in enumerate(sections):
+        if i > 0:
+            body_parts.append('<div class="page-break"></div>')
+        body_parts.append(f'<section>{section}</section>')
+
+    return (
+        '<!DOCTYPE html>\n'
+        '<html dir="rtl" lang="he">\n'
+        '<head>\n'
+        '<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f'<title>{_h(title)}</title>\n'
+        + _BASE_CSS
+        + (extra_css or "")
+        + f'<style>{_REPORT_CSS_EXTRA}</style>\n'
+        '</head>\n'
+        '<body dir="rtl" style="text-align:right; unicode-bidi:plaintext;">\n'
+        + _PRINT_BAR_HTML +
+        '<div class="report-container">\n'
+        + "\n".join(body_parts) + "\n"
+        '</div>\n'
+        '</body>\n'
+        '</html>\n'
     )
 
 
@@ -590,54 +738,53 @@ def _drawing_html(d: dict, idx: int, total: int) -> str:
     return "".join(parts)
 
 
-# ─── מנוע יצירת ה-PDF ───
-def build_assembly_pdf(
+# ─── מנוע יצירת דוח HTML ───
+def build_assembly_html(
     drawings: list[dict],
     relationships: dict | None,
     out_path: Path,
     *,
     single_mode: bool = False,
 ) -> Path:
-    """בונה דוח PDF מלא ושומר אותו ל-out_path.
+    """בונה דוח HTML מלא (RTL עברית) ושומר אותו ל-``out_path``.
 
-    משתמש ב-DocumentWriter + Story של PyMuPDF — מטפל אוטומטית
-    בגלישת תוכן בין עמודים, כולל RTL לעברית.
+    הדוח נפתח בכל דפדפן. הקונה יכול:
+      • לקרוא ישירות בדפדפן
+      • Ctrl+P → "Save as PDF" כדי לקבל קובץ PDF
+      • לשלוח כ-attachment במייל
 
     single_mode=True → כותרת "דוח ניתוח שרטוט" (יחיד), ללא סעיף קשרים.
+
+    החליף את הגרסה הישנה של build_assembly_pdf שדרשה PyMuPDF (AGPL).
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    page_w, page_h = fitz.paper_size("a4")
-    margin = 36
-    mediabox = fitz.Rect(0, 0, page_w, page_h)
-    where = fitz.Rect(margin, margin, page_w - margin, page_h - margin)
-
-    # אוסף את כל ה-HTML לחלקים — כל חלק יתחיל בעמוד חדש
     sections: list[str] = []
     if single_mode and drawings:
-        cover = _cover_html_single(drawings[0])
+        first = drawings[0]
+        sections.append(_cover_html_single(first))
+        title = (
+            f"דוח ניתוח שרטוט — {first.get('part_number') or 'unknown'}"
+        )
     else:
-        cover = _cover_html(len(drawings)) + _relationships_html(relationships)
-    sections.append(_wrap_rtl(cover))
+        sections.append(
+            _cover_html(len(drawings)) + _relationships_html(relationships)
+        )
+        title = f"דוח מכלול — {len(drawings)} שרטוטים"
+
     total = len(drawings)
     for i, d in enumerate(drawings, 1):
-        sections.append(_wrap_rtl(_drawing_html(d, i, total)))
+        sections.append(_drawing_html(d, i, total))
 
-    writer = fitz.DocumentWriter(str(out_path))
-    try:
-        for html_content in sections:
-            story = fitz.Story(html=html_content)
-            more = 1
-            while more:
-                dev = writer.begin_page(mediabox)
-                more, _filled = story.place(where)
-                story.draw(dev)
-                writer.end_page()
-    finally:
-        writer.close()
-
+    html_doc = _wrap_full_html_report(sections, title=title)
+    out_path.write_text(html_doc, encoding="utf-8")
     return out_path
+
+
+# Backwards-compat alias — קוד ישן שקורא build_assembly_pdf יקבל HTML.
+# נמחק בגרסה הבאה. UI כבר מעודכן ל-build_assembly_html.
+build_assembly_pdf = build_assembly_html
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1181,27 +1328,26 @@ def _tree_cover_html(n_drawings: int, n_rows: int) -> str:
     )
 
 
-def build_tree_pdf(
+def build_tree_html(
     drawings: list[dict],
     relationships: dict | None,
     out_path: Path,
 ) -> Path:
-    """בונה דוח PDF מקוצר של עץ המוצר בלבד.
+    """בונה דוח HTML מקוצר של עץ המוצר בלבד.
 
     כולל:
       • שער קצר
       • טבלת עץ (רמה, P/N, Drawing, תיאור, כמות, חומר)
       • סכמה ויזואלית מקננת
+
+    הדוח נפתח בדפדפן. ל-PDF — Ctrl+P → "Save as PDF".
+
+    החליף את הגרסה הישנה של build_tree_pdf שדרשה PyMuPDF (AGPL).
     """
     out_path = Path(out_path)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     rows = _flatten_tree_rows(drawings, relationships)
-
-    page_w, page_h = fitz.paper_size("a4")
-    margin = 36
-    mediabox = fitz.Rect(0, 0, page_w, page_h)
-    where = fitz.Rect(margin, margin, page_w - margin, page_h - margin)
 
     summary = ""
     rel_summary = ((relationships or {}).get("summary_he") or "").strip()
@@ -1209,32 +1355,28 @@ def build_tree_pdf(
         summary = f'<div class="summary">📋 {_h(rel_summary)}</div>'
 
     sections = [
-        _wrap_rtl_tree(
+        (
             _tree_cover_html(len(drawings or []), len(rows))
             + summary
             + "<h2>📋 טבלת עץ מוצר</h2>"
             + _tree_table_html(rows)
         ),
-        _wrap_rtl_tree(
+        (
             "<h2>🗂️ סכמת עץ מוצר</h2>"
             + _tree_schematic_html(rows)
         ),
     ]
 
-    writer = fitz.DocumentWriter(str(out_path))
-    try:
-        for html_content in sections:
-            story = fitz.Story(html=html_content)
-            more = 1
-            while more:
-                dev = writer.begin_page(mediabox)
-                more, _filled = story.place(where)
-                story.draw(dev)
-                writer.end_page()
-    finally:
-        writer.close()
-
+    title = f"דוח עץ מוצר — {len(drawings or [])} שרטוטים, {len(rows)} פריטים"
+    html_doc = _wrap_full_html_report(
+        sections, title=title, extra_css=_TREE_CSS_EXTRA
+    )
+    out_path.write_text(html_doc, encoding="utf-8")
     return out_path
+
+
+# Backwards-compat alias.
+build_tree_pdf = build_tree_html
 
 
 def build_tree_excel(
@@ -1608,7 +1750,7 @@ def _flatten_process_rows(
                 "קובץ": d.get("source_filename", ""),
                 "P/N": d.get("part_number", ""),
             }
-            for k, h in zip(keys, headers_he):
+            for k, h in zip(keys, headers_he, strict=True):
                 v = it.get(k, "")
                 if isinstance(v, bool):
                     v = "כן" if v else "לא"

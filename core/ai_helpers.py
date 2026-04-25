@@ -18,9 +18,10 @@ import json
 import logging
 import random
 import time
-from typing import Callable, TypeVar
+from collections.abc import Callable
+from typing import TypeVar
 
-from core.azure_client import is_reasoning_model, get_fallback_client_and_deployment
+from core.azure_client import get_fallback_client_and_deployment, is_reasoning_model
 from core.exceptions import (
     AllModelsFailedError,
     EmptyResponseError,

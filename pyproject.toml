@@ -1,0 +1,39 @@
+[project]
+name = "aidrawanalyser"
+version = "0.1.0"
+description = "Streamlit app for extracting engineering data from PDF drawings via Azure OpenAI Vision/Reasoning."
+requires-python = ">=3.10"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = [
+    ".venv",
+    "output",
+    "draws",
+    "REPORTS",
+    "scripts/archive",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "W",    # pycodestyle warnings
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+    "B008",  # function calls in argument defaults (Streamlit pattern)
+    "E402",  # module-level imports not at top — Streamlit set_page_config must run first
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]  # asserts in tests are fine
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "storage"]
+combine-as-imports = true

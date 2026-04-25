@@ -469,7 +469,7 @@ def ocr_confusion_distance(a: str, b: str) -> int:
     if not a or not b or len(a) != len(b):
         return 99
     diffs = 0
-    for ca, cb in zip(a.upper(), b.upper()):
+    for ca, cb in zip(a.upper(), b.upper(), strict=True):
         if ca == cb:
             continue
         if (ca, cb) in _OCR_CONFUSION_PAIRS:
@@ -489,7 +489,7 @@ def transposition_distance(a: str, b: str) -> int:
     au, bu = a.upper(), b.upper()
     if au == bu:
         return 0
-    diffs = [i for i, (ca, cb) in enumerate(zip(au, bu)) if ca != cb]
+    diffs = [i for i, (ca, cb) in enumerate(zip(au, bu, strict=True)) if ca != cb]
     if len(diffs) != 2:
         return 99
     i, j = diffs

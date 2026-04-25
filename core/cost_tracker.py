@@ -6,7 +6,6 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 # ═══════════════════════════════════════════════════════════════
 # מחירים ל-1M טוקנים (עדכן לפי החוזה שלך ב-Azure)
@@ -116,7 +115,7 @@ class DrawingCostTracker:
             f.write(json.dumps(self.summary(), ensure_ascii=False) + "\n")
 
 
-def get_aggregate_stats(log_path: Path = Path("output/costs.jsonl")) -> Optional[dict]:
+def get_aggregate_stats(log_path: Path = Path("output/costs.jsonl")) -> dict | None:
     """קרא את קובץ הלוג וחשב סטטיסטיקות מצטברות."""
     log_path = Path(log_path)
     if not log_path.exists():
@@ -127,7 +126,7 @@ def get_aggregate_stats(log_path: Path = Path("output/costs.jsonl")) -> Optional
     total_output = 0
     count = 0
 
-    with open(log_path, "r", encoding="utf-8") as f:
+    with open(log_path, encoding="utf-8") as f:
         for line in f:
             try:
                 entry = json.loads(line)

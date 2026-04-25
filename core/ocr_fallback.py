@@ -8,8 +8,8 @@ import logging
 import os
 from pathlib import Path
 
-from .pdf_utils import _render_pdf_to_pil
 from .exceptions import OCRUnavailableError
+from .pdf_utils import _render_pdf_to_pil
 
 logger = logging.getLogger(__name__)
 

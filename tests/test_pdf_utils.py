@@ -161,8 +161,9 @@ class TestPdfToImagesIntegration:
 
 class TestImageFileToB64:
     def test_png_loads(self, tmp_path):
-        from core.pdf_utils import image_file_to_b64
         from PIL import Image
+
+        from core.pdf_utils import image_file_to_b64
         p = tmp_path / "test.png"
         Image.new("RGB", (200, 200), color="white").save(p)
         result = image_file_to_b64(p)
@@ -171,8 +172,9 @@ class TestImageFileToB64:
         assert len(result[0]) > 100  # base64 לא ריק
 
     def test_jpg_converted_to_png(self, tmp_path):
-        from core.pdf_utils import image_file_to_b64
         from PIL import Image
+
+        from core.pdf_utils import image_file_to_b64
         p = tmp_path / "test.jpg"
         Image.new("RGB", (200, 200), color="blue").save(p)
         result = image_file_to_b64(p)

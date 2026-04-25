@@ -15,19 +15,19 @@ from pathlib import Path
 import streamlit as st
 
 from core.assembly import (
+    analyze_relationships,
     extract_assembly_drawing,
     extract_assembly_overview_image,
-    analyze_relationships,
-)
-from core.pn_utils import cross_reference_part_numbers
-from storage.save_handler import save_to_json
-from storage.pdf_report import (
-    build_assembly_pdf,
-    build_tree_pdf,
-    build_tree_excel,
-    build_assembly_excel,
 )
 from core.exceptions import format_error_for_ui, get_streamlit_level
+from core.pn_utils import cross_reference_part_numbers
+from storage.pdf_report import (
+    build_assembly_excel,
+    build_assembly_html,
+    build_tree_excel,
+    build_tree_html,
+)
+from storage.save_handler import save_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +74,340 @@ def _process_pdf(uploaded_file, output_dir: Path) -> dict | None:
     finally:
         if temp_path.exists():
             temp_path.unlink()
+
+
+_SUMMARY_PILL_STYLE = (
+    "display:inline-flex; flex-direction:column; align-items:flex-start; "
+    "background:white; border:1px solid #dee2e6; border-radius:0.45em; "
+    "padding:0.5em 0.85em; margin:0 0.4em 0.4em 0; min-width:140px;"
+)
+_SUMMARY_PILL_STYLE_EDITED = (
+    "display:inline-flex; flex-direction:column; align-items:flex-start; "
+    "background:#fffbe6; border:1px solid #ffd666; border-radius:0.45em; "
+    "padding:0.5em 0.85em; margin:0 0.4em 0.4em 0; min-width:140px;"
+)
+_SUMMARY_PILL_LABEL_STYLE = (
+    "font-size:0.72em; color:#6c757d; text-transform:uppercase; "
+    "letter-spacing:0.04em; margin-bottom:0.15em;"
+)
+_SUMMARY_PILL_VALUE_STYLE = (
+    "font-size:1.0em; font-weight:600; color:#212529; "
+    "unicode-bidi:plaintext; line-height:1.25;"
+)
+
+
+def _summary_pill(label: str, value: str, *, edited: bool = False) -> str:
+    safe_value = value or "—"
+    style = _SUMMARY_PILL_STYLE_EDITED if edited else _SUMMARY_PILL_STYLE
+    edit_mark = ' <span style="color:#d48806;" title="נערך ידנית">✏️</span>' if edited else ""
+    return (
+        f'<div style="{style}">'
+        f'<div style="{_SUMMARY_PILL_LABEL_STYLE}">{label}{edit_mark}</div>'
+        f'<div style="{_SUMMARY_PILL_VALUE_STYLE}">{safe_value}</div>'
+        f'</div>'
+    )
+
+
+def _get_review_status(result: dict) -> str:
+    """מחזיר סטטוס review: pending | edited | reviewed."""
+    return (result.get("_review_status") or "pending").lower()
+
+
+def _review_badge_html(status: str, ts: str = "") -> str:
+    """באנר קטן לסטטוס review (להצגה בכותרת summary card)."""
+    if status == "reviewed":
+        when = ts[:19].replace("T", " ") if ts else ""
+        suffix = f" · {when}" if when else ""
+        return (
+            f'<span style="background:#d1e7dd; color:#0f5132; '
+            f'padding:0.18em 0.65em; border-radius:1em; font-size:0.82em; '
+            f'font-weight:600; margin-right:0.5em;">'
+            f'✅ אושר ע"י משתמש{suffix}</span>'
+        )
+    if status == "edited":
+        return (
+            '<span style="background:#fff3cd; color:#664d03; '
+            'padding:0.18em 0.65em; border-radius:1em; font-size:0.82em; '
+            'font-weight:600; margin-right:0.5em;">'
+            '✏️ נערך · ממתין לאישור</span>'
+        )
+    return (
+        '<span style="background:#e2e3e5; color:#41464b; '
+        'padding:0.18em 0.65em; border-radius:1em; font-size:0.82em; '
+        'font-weight:600; margin-right:0.5em;">'
+        '⏳ ממתין ל-review</span>'
+    )
+
+
+def render_summary_card(d: dict, *, demo: bool = False) -> None:
+    """תקציר החלטה בראש מסך התוצאות — לפני כל הפירוט.
+
+    מציג את השדות המרכזיים, פירוט אזהרות לפי חומרה, וקיצור דרך לסעיף הייצוא.
+    מיועד למשתמש עסקי שצריך תשובה מהירה לפני שצולל לפרטים.
+    """
+    pn = (d.get("part_number") or "").strip()
+    dn = (d.get("drawing_number") or "").strip()
+    rev = (d.get("revision") or "").strip()
+    cust = (d.get("customer") or "").strip()
+    mat = (d.get("material") or "").strip()
+    role = (d.get("assembly_role") or "").strip()
+
+    edits = d.get("_user_edits") or {}
+    review_status = _get_review_status(d)
+    review_ts = d.get("_review_timestamp") or ""
+
+    warnings = d.get("_validation_warnings") or []
+    sev_counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0}
+    for w in warnings:
+        sev = (w.get("severity") or "LOW").upper()
+        if sev not in sev_counts:
+            sev = "LOW"
+        sev_counts[sev] += 1
+
+    sev_chips = []
+    for sev, label, color in [
+        ("CRITICAL", "קריטיות", "#dc3545"),
+        ("HIGH", "גבוהות", "#fd7e14"),
+        ("MEDIUM", "בינוניות", "#ffc107"),
+        ("LOW", "מידע", "#198754"),
+    ]:
+        n = sev_counts[sev]
+        if n == 0:
+            continue
+        sev_chips.append(
+            f'<span style="background:{color}; color:white; padding:0.18em 0.65em; '
+            f'border-radius:1em; font-size:0.85em; font-weight:600; margin:0 0.25em;">'
+            f'{n} {label}</span>'
+        )
+
+    if not warnings:
+        warning_html = (
+            '<span style="color:#198754; font-weight:600;">'
+            '✅ אין אזהרות ולידציה</span>'
+        )
+    else:
+        warning_html = (
+            f'<span style="color:#495057; font-weight:600; margin-left:0.4em;">'
+            f'⚠️ {len(warnings)} אזהרות:</span>' + "".join(sev_chips)
+        )
+
+    demo_banner = ""
+    if demo:
+        demo_banner = (
+            '<div style="background:#fff3cd; color:#664d03; padding:0.35em 0.7em; '
+            'border-radius:0.4em; margin-bottom:0.7em; font-size:0.88em; '
+            'font-weight:600;">'
+            '🎬 מצב דמו — תוצאה זו נטענה מקובץ דוגמה (לא נקראה ל-Azure).'
+            '</div>'
+        )
+
+    pills_html = "".join([
+        _summary_pill("Part Number", pn, edited="part_number" in edits),
+        _summary_pill("Drawing Number", dn, edited="drawing_number" in edits),
+        _summary_pill("Revision", rev, edited="revision" in edits),
+        _summary_pill("Customer", cust, edited="customer" in edits),
+        _summary_pill("Role", role),
+    ])
+    material_pill = _summary_pill("Material", mat, edited="material" in edits)
+
+    st.markdown(
+        f'<div dir="rtl" style="background:#f8f9fa; border:1px solid #dee2e6; '
+        f'border-right:5px solid #0d6efd; border-radius:0.6em; '
+        f'padding:1em 1.2em; margin-bottom:1em;">'
+        f'{demo_banner}'
+        f'<div style="display:flex; align-items:center; '
+        f'margin-bottom:0.7em; flex-wrap:wrap;">'
+        f'<div style="font-size:1.05em; font-weight:700; color:#0d6efd; '
+        f'margin-left:0.5em;">📋 תקציר ניתוח</div>'
+        f'{_review_badge_html(review_status, review_ts)}'
+        f'</div>'
+        f'<div style="display:flex; flex-wrap:wrap;">{pills_html}</div>'
+        f'<div style="margin-top:0.5em;">{material_pill}</div>'
+        f'<div style="margin-top:0.6em; padding-top:0.6em; '
+        f'border-top:1px solid #dee2e6;">{warning_html}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+_EDITABLE_SCALAR_FIELDS: list[tuple[str, str, str]] = [
+    ("part_number", "P/N", "Part Number"),
+    ("drawing_number", "DWG", "Drawing Number"),
+    ("revision", "Rev", "Revision"),
+    ("customer", "לקוח", "Customer"),
+    ("material", "חומר", "Material"),
+    ("quantity", "כמות", "Quantity"),
+]
+
+
+def _strip(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def render_review_edit_form(result: dict, *, key_prefix: str = "review") -> bool:
+    """טופס לעריכת שדות מרכזיים + אישור התוצאה לפני export.
+
+    מעדכן את ``result`` במקום (in-place mutation):
+      - ערכי השדות הנערכים מוחלפים.
+      - ``_user_edits[field] = original_value`` — נשמר רק בעריכה הראשונה.
+      - ``_review_status`` = ``edited`` כשנעשו שינויים, ``reviewed`` אחרי אישור.
+      - ``_review_timestamp`` נכתב באישור.
+
+    מחזיר ``True`` אם המשתמש אישר את התוצאה (להפעלת UI אחר אם רוצים).
+    """
+    from datetime import datetime as _dt
+
+    status = _get_review_status(result)
+    user_edits: dict = result.get("_user_edits") or {}
+
+    # ─── אם כבר אושר — מציגים סטטוס + כפתור עריכה מחדש ───
+    if status == "reviewed":
+        ts = result.get("_review_timestamp", "")
+        when = ts[:19].replace("T", " ") if ts else ""
+        st.success(
+            f"✅ התוצאה אושרה ע\"י המשתמש{' ב-' + when if when else ''}. "
+            f"הדוחות יסומנו כעבר review ידני."
+        )
+        if st.button(
+            "✏️ ערוך מחדש",
+            key=f"{key_prefix}_edit_again",
+            help="חזרה למצב עריכה — האישור הקודם יימחק",
+        ):
+            result["_review_status"] = "edited" if user_edits else "pending"
+            result.pop("_review_timestamp", None)
+            st.rerun()
+        return True
+
+    # ─── הודעה מנחה ───
+    nudge_text = (
+        "💡 **לפני יצירת דוח:** עברי על השדות המרכזיים, תקני אם צריך, "
+        "ולחצי 'אשר תוצאה'. אם הכל נראה תקין — לחצי ישר אישור."
+    )
+    if user_edits:
+        nudge_text += f"\n\n📝 ערכת עד עתה {len(user_edits)} שדות."
+    st.info(nudge_text)
+
+    # ─── הטופס עצמו ───
+    with st.form(key=f"{key_prefix}_form", border=True):
+        st.markdown("#### ✏️ עריכת שדות מרכזיים")
+
+        cols = st.columns(2)
+        new_scalars: dict[str, str] = {}
+        for i, (key, label_he, label_en) in enumerate(_EDITABLE_SCALAR_FIELDS):
+            with cols[i % 2]:
+                current = _strip(result.get(key))
+                marker = " ✏️" if key in user_edits else ""
+                new_scalars[key] = st.text_input(
+                    f"{label_he} ({label_en}){marker}",
+                    value=current,
+                    key=f"{key_prefix}_{key}",
+                )
+
+        # תקנים — רשימה כמחרוזת מופרדת בפסיק
+        stds_list = result.get("standards") or []
+        if not isinstance(stds_list, list):
+            stds_list = []
+        stds_str = ", ".join(_strip(s) for s in stds_list)
+        marker = " ✏️" if "standards" in user_edits else ""
+        new_stds_str = st.text_area(
+            f"תקנים (Standards) — מופרדים בפסיק{marker}",
+            value=stds_str,
+            key=f"{key_prefix}_standards",
+            height=70,
+        )
+
+        # אריזה — he + en
+        pkg = result.get("packaging_notes") or {}
+        if not isinstance(pkg, dict):
+            pkg = {}
+        pkg_cols = st.columns(2)
+        with pkg_cols[0]:
+            marker = " ✏️" if "packaging_notes.he" in user_edits else ""
+            new_pkg_he = st.text_area(
+                f"הוראת אריזה (עברית){marker}",
+                value=_strip(pkg.get("he", "")),
+                key=f"{key_prefix}_pkg_he",
+                height=70,
+            )
+        with pkg_cols[1]:
+            marker = " ✏️" if "packaging_notes.en" in user_edits else ""
+            new_pkg_en = st.text_area(
+                f"הוראת אריזה (English){marker}",
+                value=_strip(pkg.get("en", "")),
+                key=f"{key_prefix}_pkg_en",
+                height=70,
+            )
+
+        submitted = st.form_submit_button(
+            "💾 שמור שינויים",
+            use_container_width=True,
+        )
+
+        if submitted:
+            changes_count = 0
+
+            # שדות סקלריים
+            for key, _label_he, _label_en in _EDITABLE_SCALAR_FIELDS:
+                old = _strip(result.get(key))
+                new = new_scalars[key].strip()
+                if new != old:
+                    if key not in user_edits:
+                        user_edits[key] = old
+                    result[key] = new
+                    changes_count += 1
+
+            # תקנים
+            new_stds = [s.strip() for s in new_stds_str.split(",") if s.strip()]
+            if new_stds != [_strip(s) for s in stds_list]:
+                if "standards" not in user_edits:
+                    user_edits["standards"] = list(stds_list)
+                result["standards"] = new_stds
+                changes_count += 1
+
+            # אריזה
+            for sub_key, new_val, old_val in [
+                ("he", new_pkg_he.strip(), _strip(pkg.get("he", ""))),
+                ("en", new_pkg_en.strip(), _strip(pkg.get("en", ""))),
+            ]:
+                if new_val != old_val:
+                    edit_key = f"packaging_notes.{sub_key}"
+                    if edit_key not in user_edits:
+                        user_edits[edit_key] = old_val
+                    if not isinstance(result.get("packaging_notes"), dict):
+                        result["packaging_notes"] = {"he": "", "en": ""}
+                    result["packaging_notes"][sub_key] = new_val
+                    changes_count += 1
+
+            if changes_count:
+                result["_user_edits"] = user_edits
+                result["_review_status"] = "edited"
+                # אישור קודם בטל אם היה
+                result.pop("_review_timestamp", None)
+                st.success(f"✅ נשמרו {changes_count} שינויים")
+                st.rerun()
+            else:
+                st.caption("אין שינויים לשמירה")
+
+    # ─── כפתור אישור (מחוץ לטופס כדי שלא יוגש יחד עם 'שמור שינויים') ───
+    approve_cols = st.columns([1, 2])
+    with approve_cols[0]:
+        if st.button(
+            "✅ אשר תוצאה לייצוא",
+            type="primary",
+            use_container_width=True,
+            key=f"{key_prefix}_approve",
+        ):
+            result["_review_status"] = "reviewed"
+            result["_review_timestamp"] = _dt.now().isoformat()
+            st.rerun()
+    with approve_cols[1]:
+        st.caption(
+            "אישור התוצאה יסמן את הדוחות שייוצאו כעבר review ידני "
+            "ויפתח את כפתורי הייצוא."
+        )
+    return False
 
 
 def _render_drawing_card(d: dict):
@@ -308,10 +642,45 @@ def _render_drawing_card(d: dict):
 
 
 _SEVERITY_ICON = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
+_SEVERITY_LABEL_HE = {
+    "CRITICAL": "קריטי — דורש בדיקה לפני export",
+    "HIGH": "גבוה — מומלץ לבדוק",
+    "MEDIUM": "בינוני — שווה תשומת לב",
+    "LOW": "מידע בלבד",
+}
+
+# הצעות גנריות "מה לבדוק" לפי סוג ה-warning. מאפשר ל-UI להראות actionable
+# advice בלי להוסיף שדה למודל הוולידציה עצמו.
+_WARNING_ACTION_HINTS = {
+    "RAL_INVALID":          "השוו לקוד RAL הנכון מטבלת RAL הרשמית.",
+    "RAL_NONSTANDARD":      "ייתכן שהמודל קרא קוד שגוי — אמתו מול ה-NOTES.",
+    "BRAND_INVALID":        "בדקו אם שם המותג נכתב נכון בשרטוט.",
+    "COATING_TYPE":         "ודאו שסיווג הציפוי תואם לתקן בשרטוט.",
+    "PACKING_NOTE":         "ודאו שצוות האריזה מעודכן לדרישות.",
+    "MISSING_PACKING":      "בדקו ידנית את סעיף PACKING בשרטוט.",
+    "POSSIBLE_OBSOLETE_SPEC": "התקן עלול להיות מוחלף — אמתו מול הלקוח.",
+    "STANDARD_HALLUCINATION": "התקן לא נמצא ב-OCR — בדקו ידנית בשרטוט.",
+    "STANDARD_MISMATCH":    "השוו את התקן לטקסט מקור (OCR/PDF).",
+    "DWG_PREFIX":           "בדקו שמספר השרטוט תואם לקידומת לקוח.",
+    "PN_MISMATCH":          "השוו את ה-P/N לתוכן השרטוט ולשם הקובץ.",
+    "NO_PACKING_REQUIREMENT_IN_DRAWING": "המודל סימן שאין דרישת אריזה — בדקו לוודא.",
+}
+
+
+def _action_hint_for_warning(w: dict) -> str:
+    """מחזיר רמז 'מה לבדוק' לפי סוג ה-warning, או ברירת מחדל גנרית."""
+    wtype = (w.get("type") or "").strip().upper()
+    if wtype in _WARNING_ACTION_HINTS:
+        return _WARNING_ACTION_HINTS[wtype]
+    # מנסים match חלקי
+    for key, hint in _WARNING_ACTION_HINTS.items():
+        if key in wtype:
+            return hint
+    return "בדקו את השדה ידנית בשרטוט המקורי."
 
 
 def _render_validation_warnings(result: dict) -> None:
-    """מציג אזהרות ולידציה אם קיימות."""
+    """מציג אזהרות ולידציה אם קיימות, עם 'מה לבדוק' לכל אזהרה."""
     warnings = result.get("_validation_warnings") or []
     if not warnings:
         return
@@ -321,11 +690,15 @@ def _render_validation_warnings(result: dict) -> None:
         label += f" — {len(critical)} 🔴 קריטיות"
     with st.expander(label, expanded=bool(critical)):
         for w in warnings:
-            icon = _SEVERITY_ICON.get(w.get("severity", ""), "⚪")
+            sev = (w.get("severity") or "").upper()
+            icon = _SEVERITY_ICON.get(sev, "⚪")
+            sev_label = _SEVERITY_LABEL_HE.get(sev, sev or "")
+            value_str = str(w.get("value", ""))[:80]
             st.markdown(
-                f"{icon} **{w.get('type', '')}** | מקור: `{w.get('source', '')}` | "
-                f"ערך: `{w.get('value', '')[:80]}`  \n"
-                f"_{w.get('message', '')}_"
+                f"{icon} **{w.get('type', '')}** · _{sev_label}_  \n"
+                f"מקור: `{w.get('source', '')}` · ערך: `{value_str}`  \n"
+                f"_{w.get('message', '')}_  \n"
+                f"💡 **מה לבדוק:** {_action_hint_for_warning(w)}"
             )
 
 
@@ -606,8 +979,18 @@ def render_assembly_mode(output_dir: Path):
                f"`{results[idx].get('source_filename', '')}`")
 
     # ─── 4. תצוגה מלאה של השרטוט הנבחר ───
-    _render_drawing_card(results[idx])
+    render_summary_card(results[idx])
+    with st.expander("📋 פירוט מלא של השרטוט", expanded=True):
+        _render_drawing_card(results[idx])
     _render_validation_warnings(results[idx])
+
+    # ─── 4.5 Review של השרטוט הנוכחי ───
+    pn_for_key = (results[idx].get("part_number") or f"idx{idx}").replace(" ", "_")
+    with st.expander("✏️ Review השרטוט הזה", expanded=False):
+        render_review_edit_form(
+            results[idx],
+            key_prefix=f"asm_review_{idx}_{pn_for_key}",
+        )
     _render_stage_model_feedback(
         (results[idx].get("_cost_info") or {}),
         title="🤖 מודל בפועל בשלבי ניתוח השרטוט הזה",
@@ -647,51 +1030,77 @@ def render_assembly_mode(output_dir: Path):
         st.info("💡 לאחר ניתוח הקשרים, תוכל להוריד דוחות PDF ו-Excel "
                 "מסעיף 'הורדת קבצים' שיופיע כאן.")
 
-    with st.expander("📦 הורדת קבצים (PDF / Excel)",
+    # ─── סיכום review לכל השרטוטים ───
+    _reviewed_count = sum(
+        1 for r in results if _get_review_status(r) == "reviewed"
+    )
+    _total_count = len(results)
+    if _reviewed_count < _total_count:
+        _pending_pns = [
+            (r.get("part_number") or r.get("source_filename") or "?")
+            for r in results
+            if _get_review_status(r) != "reviewed"
+        ]
+        st.warning(
+            f"⚠️ **Review:** {_reviewed_count}/{_total_count} שרטוטים אושרו. "
+            f"הדוחות יכללו גם שרטוטים שלא עברו review. ממליצים לעבור ב-expander "
+            f"'✏️ Review השרטוט הזה' תחת כל שרטוט. ממתינים: "
+            + ", ".join(f"`{pn}`" for pn in _pending_pns[:5])
+            + (" ועוד..." if len(_pending_pns) > 5 else "")
+        )
+    else:
+        st.success(f"✅ כל {_total_count} השרטוטים אושרו ע\"י המשתמש.")
+
+    with st.expander("📦 הורדת קבצים (HTML / Excel)",
                      expanded=bool(rel)):
         if rel is None:
             st.caption("ℹ️ ניתן להפיק קבצים גם ללא ניתוח קשרים, "
                        "אבל הם יוצגו כרשימה שטוחה במקום עץ מובנה.")
 
-        tab_pdf_full, tab_pdf_tree, tab_xlsx_full, tab_xlsx_tree = st.tabs([
-            "📕 PDF מלא",
-            "🌳 PDF עץ מקוצר",
+        st.caption(
+            "💡 הדוחות הם **HTML** — נפתחים בכל דפדפן. "
+            "ל-PDF: לחצי בדפדפן Ctrl+P → 'Save as PDF'."
+        )
+
+        tab_html_full, tab_html_tree, tab_xlsx_full, tab_xlsx_tree = st.tabs([
+            "📄 HTML מלא",
+            "🌳 HTML עץ מקוצר",
             "📊 Excel מלא",
             "📊 Excel עץ מקוצר",
         ])
 
-        # ── טאב 1: דוח PDF מלא ──
-        with tab_pdf_full:
-            st.caption("דוח PDF מקיף לכל שרטוט: כותרת, חומר, תהליכים, "
+        # ── טאב 1: דוח HTML מלא ──
+        with tab_html_full:
+            st.caption("דוח HTML מקיף לכל שרטוט: כותרת, חומר, תהליכים, "
                        "תקנים, NOTES, ובסוף ניתוח הקשרים בין השרטוטים.")
             _render_export_pair(
-                button_label="📕 צור דוח PDF מלא",
-                spinner_text="📄 מייצר דוח PDF...",
-                build_fn=lambda p: build_assembly_pdf(results, rel, p),
+                button_label="📄 צור דוח HTML מלא",
+                spinner_text="📄 מייצר דוח HTML...",
+                build_fn=lambda p: build_assembly_html(results, rel, p),
                 out_path=output_dir / f"_assembly_report_"
-                                      f"{datetime.now():%Y%m%d_%H%M%S}.pdf",
-                state_key="asm_pdf_path",
-                mime="application/pdf",
-                btn_key="btn_pdf_full",
-                dl_key="dl_pdf_full",
-                err_label="PDF",
+                                      f"{datetime.now():%Y%m%d_%H%M%S}.html",
+                state_key="asm_html_path",
+                mime="text/html",
+                btn_key="btn_html_full",
+                dl_key="dl_html_full",
+                err_label="HTML",
             )
 
-        # ── טאב 2: דוח PDF עץ מקוצר ──
-        with tab_pdf_tree:
-            st.caption("דוח PDF קצר: טבלת עץ מוצר + סכמה גרפית של "
+        # ── טאב 2: דוח עץ מקוצר ──
+        with tab_html_tree:
+            st.caption("דוח HTML קצר: טבלת עץ מוצר + סכמה גרפית של "
                        "המבנה ההיררכי. ללא פירוט תהליכים לכל שרטוט.")
             _render_export_pair(
-                button_label="🌳 צור דוח עץ מוצר (PDF)",
+                button_label="🌳 צור דוח עץ מוצר (HTML)",
                 spinner_text="📄 מייצר דוח עץ...",
-                build_fn=lambda p: build_tree_pdf(results, rel, p),
+                build_fn=lambda p: build_tree_html(results, rel, p),
                 out_path=output_dir / f"_assembly_tree_"
-                                      f"{datetime.now():%Y%m%d_%H%M%S}.pdf",
-                state_key="asm_tree_pdf_path",
-                mime="application/pdf",
-                btn_key="btn_pdf_tree",
-                dl_key="dl_pdf_tree",
-                err_label="PDF עץ",
+                                      f"{datetime.now():%Y%m%d_%H%M%S}.html",
+                state_key="asm_tree_html_path",
+                mime="text/html",
+                btn_key="btn_html_tree",
+                dl_key="dl_html_tree",
+                err_label="HTML עץ",
             )
 
         # ── טאב 3: Excel מלא ──

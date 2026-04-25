@@ -14,8 +14,8 @@ import json
 import os
 from pathlib import Path
 
-from openai import AzureOpenAI, OpenAI
 from dotenv import load_dotenv
+from openai import AzureOpenAI, OpenAI
 
 from core.exceptions import MissingCredentialsError
 
@@ -110,11 +110,11 @@ def get_masters_xlsx_path() -> str:
     rt = _load_runtime_settings()
     if rt.get("masters_xlsx_path"):
         return str(rt["masters_xlsx_path"]).strip()
-    
+
     env_val = os.getenv("MASTERS_XLSX_PATH", "").strip()
     if env_val:
         return env_val
-    
+
     # ברירת מחדל
     return ""
 

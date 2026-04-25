@@ -1,0 +1,1543 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>AIDrawAnalyser — Interactive Demo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="הדגמה אינטראקטיבית של AIDrawAnalyser ללא צורך בשרת או ב-Azure.">
+<style>
+  /* ─── Base ─── */
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: "Segoe UI", "Heebo", -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f0fbfd;
+    color: #212529;
+    direction: rtl;
+    text-align: right;
+    line-height: 1.5;
+  }
+  body { padding: 1.2rem; max-width: 1300px; margin: 0 auto; }
+  h1, h2, h3, h4 { font-weight: 700; letter-spacing: -0.01em; margin: 0.4em 0; }
+  h1 { font-size: 1.5em; color: white; }
+  h3 { font-size: 1.15em; color: #495057; margin-top: 1.2em; }
+  code { direction: ltr; text-align: left; unicode-bidi: embed; background: #f1f3f5; padding: 0.1em 0.3em; border-radius: 0.2em; font-size: 0.92em; }
+  hr { border: none; border-top: 1px solid #dee2e6; margin: 1.5em 0; }
+  button { font-family: inherit; }
+
+  /* ─── Header ─── */
+  .app-header {
+    background: linear-gradient(135deg, #0d6efd 0%, #6610f2 100%);
+    color: white;
+    padding: 0.9em 1.4em;
+    border-radius: 0.7em;
+    margin-bottom: 1em;
+    box-shadow: 0 4px 12px rgba(13,110,253,0.18);
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .app-header h1 { display: flex; align-items: center; gap: 0.4em; }
+  .app-header .tagline { font-size: 0.85em; opacity: 0.9; margin-top: 0.15em; }
+  .app-header .right { text-align: left; font-size: 0.85em; opacity: 0.95; }
+
+  /* ─── Mode banner ─── */
+  .mode-banner {
+    color: white;
+    padding: 0.75em 1.2em;
+    border-radius: 0.6em;
+    margin-bottom: 1em;
+    display: flex; justify-content: space-between; align-items: center;
+    font-weight: 600;
+    background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+    box-shadow: 0 3px 10px rgba(8,145,178,0.22);
+    border-right: 4px solid #155e75;
+  }
+  .mode-banner-assembly {
+    background: linear-gradient(135deg, #ea580c 0%, #f59e0b 100%);
+    box-shadow: 0 3px 10px rgba(234,88,12,0.22);
+    border-right: 4px solid #9a3412;
+  }
+  .mode-title { font-size: 1.15em; }
+  .mode-tagline { font-size: 0.85em; opacity: 0.92; font-weight: 400; }
+  body[data-mode="assembly"] { background: #fff7ed; }
+
+  /* ─── Mode toggle buttons ─── */
+  .mode-btn { background: white; color: #495057; border: 1.5px solid #ced4da; flex: 1; padding: 0.7em 1em; font-size: 1em; }
+  .mode-btn:hover { background: #e9ecef; }
+  .mode-btn-active { background: #0d6efd; color: white; border-color: #0d6efd; }
+  .mode-btn-active:hover { background: #0b5ed7; }
+
+  /* ─── Assembly: file list ─── */
+  .file-row {
+    display: flex; align-items: center; padding: 0.55em 0.8em;
+    background: white; border: 1px solid #dee2e6;
+    border-radius: 0.4em; margin-bottom: 0.4em;
+    cursor: pointer; transition: all 0.1s;
+  }
+  .file-row:hover { background: #f0f7ff; border-color: #0d6efd; }
+  .file-row.active { background: #e7f1ff; border-color: #0d6efd; border-right: 4px solid #0d6efd; font-weight: 600; }
+  .file-row .file-icon { margin-left: 0.5em; }
+  .file-row .file-status { margin-right: auto; font-size: 0.85em; }
+
+  /* ─── Navigator arrows ─── */
+  .nav-bar { display: flex; gap: 0.4em; align-items: center; margin: 0.7em 0; }
+  .nav-bar select { flex: 2; padding: 0.5em; border: 1px solid #ced4da; border-radius: 0.35em; direction: ltr; text-align: left; background: white; font-family: inherit; }
+  .nav-arrow { padding: 0.5em 0.9em; flex: 0 0 auto; }
+
+  /* ─── Tree visualization ─── */
+  .tree-node {
+    background: white; border: 1px solid #dee2e6;
+    border-radius: 0.5em; padding: 0.7em 0.9em;
+    margin-bottom: 0.4em;
+  }
+  .tree-node.tree-root {
+    background: linear-gradient(135deg,#fff5e6 0%,#ffe8cc 100%);
+    border: 2px solid #ea580c; font-weight: 600;
+  }
+  .tree-node.tree-child { margin-right: 2em; border-right: 3px solid #6c757d; }
+  .tree-node.tree-missing { background: #fff5f5; border-right: 3px solid #dc3545; opacity: 0.85; }
+  .tree-node.tree-uploaded { border-right: 3px solid #198754; }
+  .tree-link {
+    color: #6c757d; font-size: 0.85em; margin-right: 1em;
+  }
+  .tree-status {
+    font-size: 0.85em; padding: 0.1em 0.5em;
+    border-radius: 0.8em; margin-right: 0.5em;
+  }
+  .tree-status-uploaded { background: #d1e7dd; color: #0f5132; }
+  .tree-status-missing  { background: #f8d7da; color: #842029; }
+
+  /* ─── Stats row (counts) ─── */
+  .stats-row {
+    display: flex; gap: 0.5em; margin-bottom: 0.8em;
+  }
+  .stat-box {
+    flex: 1; background: white; border: 1px solid #dee2e6;
+    border-radius: 0.5em; padding: 0.7em;
+    text-align: center;
+  }
+  .stat-box .stat-num { font-size: 1.5em; font-weight: 700; color: #0d6efd; }
+  .stat-box .stat-label { font-size: 0.82em; color: #6c757d; margin-top: 0.2em; }
+  .stat-box.stat-warn .stat-num { color: #fd7e14; }
+  .stat-box.stat-success .stat-num { color: #198754; }
+  .stat-box.stat-danger .stat-num { color: #dc3545; }
+
+  /* ─── Containers ─── */
+  .card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.5em;
+    padding: 1em 1.2em;
+    margin-bottom: 1em;
+  }
+  .card-title { font-weight: 700; color: #495057; margin-bottom: 0.5em; }
+
+  /* ─── Demo banner ─── */
+  .demo-banner {
+    background: #fff3cd; color: #664d03;
+    padding: 0.5em 0.8em; border-radius: 0.4em;
+    margin-bottom: 0.7em; font-size: 0.88em; font-weight: 600;
+  }
+  .info-box {
+    background: #cfe8ff; color: #084298;
+    padding: 0.7em 1em; border-radius: 0.4em;
+    border-right: 4px solid #0d6efd;
+    margin-bottom: 0.8em;
+  }
+  .warning-box {
+    background: #fff3cd; color: #664d03;
+    padding: 0.7em 1em; border-radius: 0.4em;
+    border-right: 4px solid #ffc107;
+    margin-bottom: 0.8em;
+  }
+  .success-box {
+    background: #d1e7dd; color: #0f5132;
+    padding: 0.7em 1em; border-radius: 0.4em;
+    border-right: 4px solid #198754;
+    margin-bottom: 0.8em;
+  }
+
+  /* ─── Buttons ─── */
+  .btn {
+    border-radius: 0.4em; font-weight: 600;
+    padding: 0.55em 1.2em; border: 1px solid #dee2e6;
+    background: white; cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn:hover { transform: translateY(-1px); box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+  .btn-primary { background: #0d6efd; color: white; border-color: #0d6efd; }
+  .btn-primary:hover { background: #0b5ed7; }
+  .btn-secondary { background: #6c757d; color: white; border-color: #6c757d; }
+  .btn-success { background: #198754; color: white; border-color: #198754; }
+  .btn-danger { background: #dc3545; color: white; border-color: #dc3545; }
+  .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btn-row { display: flex; gap: 0.5em; margin-top: 0.6em; flex-wrap: wrap; }
+  .btn-row > .btn { flex: 1 1 auto; min-width: 140px; }
+
+  /* ─── Summary card ─── */
+  .summary-card {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-right: 5px solid #0d6efd;
+    border-radius: 0.6em;
+    padding: 1em 1.2em;
+    margin-bottom: 1em;
+  }
+  .summary-header {
+    display: flex; align-items: center; flex-wrap: wrap;
+    margin-bottom: 0.7em;
+  }
+  .summary-title { font-size: 1.05em; font-weight: 700; color: #0d6efd; margin-left: 0.5em; }
+
+  .review-badge {
+    padding: 0.18em 0.65em; border-radius: 1em;
+    font-size: 0.82em; font-weight: 600; margin-right: 0.5em;
+  }
+  .badge-pending  { background: #e2e3e5; color: #41464b; }
+  .badge-edited   { background: #fff3cd; color: #664d03; }
+  .badge-reviewed { background: #d1e7dd; color: #0f5132; }
+
+  .pills { display: flex; flex-wrap: wrap; }
+  .pill {
+    display: inline-flex; flex-direction: column; align-items: flex-start;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 0.45em;
+    padding: 0.5em 0.85em;
+    margin: 0 0.4em 0.4em 0;
+    min-width: 140px;
+  }
+  .pill-edited { background: #fffbe6; border-color: #ffd666; }
+  .pill-label  { font-size: 0.72em; color: #6c757d; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15em; }
+  .pill-value  { font-size: 1.0em; font-weight: 600; color: #212529; unicode-bidi: plaintext; line-height: 1.25; }
+
+  .warning-summary {
+    margin-top: 0.6em; padding-top: 0.6em;
+    border-top: 1px solid #dee2e6;
+  }
+  .sev-chip {
+    color: white; padding: 0.18em 0.65em;
+    border-radius: 1em; font-size: 0.85em; font-weight: 600;
+    margin: 0 0.25em;
+  }
+  .sev-critical { background: #dc3545; }
+  .sev-high     { background: #fd7e14; }
+  .sev-medium   { background: #ffc107; color: #212529; }
+  .sev-low      { background: #198754; }
+
+  /* ─── Drawing card (full detail) ─── */
+  .detail-card {
+    background: linear-gradient(135deg,#eef5ff 0%,#e8f5e9 100%);
+    border: 2px solid #0d6efd;
+    border-radius: 0.7em;
+    padding: 1em 1.2em;
+    margin-bottom: 1em;
+    line-height: 1.7;
+    font-size: 0.95em;
+  }
+  .detail-card .field-row { margin-top: 0.4em; }
+  .detail-card .field-label { color: #6c757d; }
+  .detail-card .field-value { font-weight: 700; }
+
+  /* ─── Tables ─── */
+  table { width: 100%; border-collapse: collapse; margin: 0.5em 0; font-size: 0.9em; }
+  th, td { border: 1px solid #dee2e6; padding: 0.45em 0.65em; text-align: right; vertical-align: top; }
+  th { background: #f1f3f5; font-weight: 700; }
+  td.ltr { direction: ltr; text-align: left; }
+
+  /* ─── Expander ─── */
+  details {
+    border: 1px solid #dee2e6; border-radius: 0.5em;
+    padding: 0.7em 1em; margin-bottom: 0.6em;
+    background: white;
+  }
+  details > summary {
+    cursor: pointer; font-weight: 600; padding: 0.2em 0;
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker { display: none; }
+  details > summary::before { content: "▸ "; font-size: 0.8em; transition: transform 0.15s; display: inline-block; }
+  details[open] > summary::before { content: "▾ "; }
+
+  /* ─── Warnings list ─── */
+  .warning-item { margin-bottom: 0.7em; padding: 0.5em 0.7em; background: #fff8e1; border-radius: 0.4em; border-right: 3px solid #ffc107; }
+  .warning-action { color: #6f4e00; font-size: 0.88em; margin-top: 0.3em; }
+
+  /* ─── Review form ─── */
+  .form-row { margin-bottom: 0.7em; }
+  .form-row label { display: block; font-weight: 600; margin-bottom: 0.2em; color: #495057; font-size: 0.88em; }
+  .form-row input, .form-row textarea {
+    width: 100%; padding: 0.45em 0.6em; font-family: inherit; font-size: 0.95em;
+    border: 1px solid #ced4da; border-radius: 0.35em;
+    direction: ltr; text-align: left; background: white;
+  }
+  .form-row input:focus, .form-row textarea:focus {
+    outline: none; border-color: #0d6efd; box-shadow: 0 0 0 0.15rem rgba(13,110,253,0.15);
+  }
+  .form-row .edit-mark { color: #d48806; font-size: 0.85em; margin-right: 0.3em; }
+
+  /* ─── Tabs ─── */
+  .tabs { display: flex; gap: 0.3em; border-bottom: 1px solid #dee2e6; margin-bottom: 0.8em; }
+  .tab { padding: 0.5em 1em; cursor: pointer; border: 1px solid transparent; border-bottom: none; border-radius: 0.4em 0.4em 0 0; font-weight: 600; color: #6c757d; }
+  .tab.active { background: white; border-color: #dee2e6; color: #0d6efd; margin-bottom: -1px; }
+  .tab-content { display: none; }
+  .tab-content.active { display: block; }
+
+  /* ─── Helpers ─── */
+  .muted { color: #6c757d; font-size: 0.88em; }
+  .hidden { display: none !important; }
+  .small { font-size: 0.88em; }
+
+  /* ─── Footer ─── */
+  .footer { margin-top: 2em; padding-top: 1em; border-top: 1px solid #dee2e6; text-align: center; color: #6c757d; font-size: 0.85em; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════ Header ════════════════ -->
+<div class="app-header">
+  <div>
+    <h1>📐 AIDrawAnalyser</h1>
+    <div class="tagline">ניתוח אוטומטי של שרטוטים טכניים בעזרת AI</div>
+  </div>
+  <div class="right">
+    <div>מודל פעיל: <b>gpt-4o</b></div>
+    <div style="margin-top:0.2em;">👁️ Vision</div>
+  </div>
+</div>
+
+<!-- ════════════════ Mode toggle ════════════════ -->
+<div class="card" style="background:#f8f9fa; padding: 0.7em 1em;">
+  <div style="font-size:0.88em; color:#6c757d; font-weight:600; margin-bottom:0.4em;">🧭 מצב עבודה</div>
+  <div style="display:flex; gap: 0.5em;">
+    <button class="btn mode-btn mode-btn-active" id="mode-btn-single" onclick="switchMode('single')">
+      🔍 שרטוט בודד
+    </button>
+    <button class="btn mode-btn" id="mode-btn-assembly" onclick="switchMode('assembly')">
+      🧩 מכלולים מרובים
+    </button>
+  </div>
+</div>
+
+<!-- ════════════════ Mode banner (single) ════════════════ -->
+<div class="mode-banner" id="mode-banner-single">
+  <div class="mode-title">🔍 מצב שרטוט בודד</div>
+  <div class="mode-tagline">ניתוח מלא של PDF יחיד</div>
+</div>
+
+<!-- ════════════════ Mode banner (assembly) ════════════════ -->
+<div class="mode-banner mode-banner-assembly hidden" id="mode-banner-assembly">
+  <div class="mode-title">🧩 מצב מכלולים מרובים</div>
+  <div class="mode-tagline">ניתוח קבוצת שרטוטים + קשרי אבא/בן</div>
+</div>
+
+<!-- ════════════════ Demo notice ════════════════ -->
+<div class="warning-box">
+  <b>🎬 Interactive Demo</b> — דף HTML עצמאי, לא דורש Azure / Python / שרת.
+  כל הפעולות דמה. ב-deployment אמיתי הניתוח לוקח 20-40 שניות מול Azure OpenAI.
+</div>
+
+<!-- ════════════════════════════════════════════════════════════════════
+     SINGLE MODE — ALL EXISTING UI WRAPPED HERE
+     ════════════════════════════════════════════════════════════════════ -->
+<div id="single-mode-section">
+
+<!-- ════════════════ Empty State ════════════════ -->
+<div id="empty-state" class="card">
+  <div style="font-size:1.25em; font-weight:700; color:#0d6efd; margin-bottom:0.4em;">
+    נתחי שרטוט PDF והפיקי דוח ייצור
+  </div>
+  <div style="color:#495057; line-height:1.7;">
+    • חילוץ אוטומטי של P/N, חומר, תקנים, ציפויים, צביעה ובדיקות.<br>
+    • אזהרות ולידציה אוטומטיות לערכים חשודים (RAL, מותגי צבע, אריזה).<br>
+    • Review/Edit ידני לפני יצירת דוח — שמירה על אמון תעשייתי.<br>
+    • ייצוא לדוח PDF, Excel רב-גיליוני או JSON גולמי.
+  </div>
+</div>
+
+<!-- ════════════════ Upload + Demo ════════════════ -->
+<div class="card">
+  <h3>1️⃣ העלה שרטוט PDF</h3>
+  <div style="display:flex; gap:1em; align-items:center;">
+    <div style="flex: 1; padding: 1.2em; border: 2px dashed #ced4da; border-radius: 0.5em; text-align:center; color:#6c757d;">
+      📄 גררי שרטוט PDF (מושבת בדמו)
+    </div>
+    <div style="text-align: center;">
+      <div class="muted small">או:</div>
+    </div>
+    <button class="btn btn-primary" onclick="loadDemo()" id="load-demo-btn">
+      🎬 טען דוגמה
+    </button>
+  </div>
+  <div class="muted small" style="margin-top: 0.6em;">
+    💡 בדמו: לחיצה על "טען דוגמה" טוענת תוצאת ניתוח שמורה (פריט ACME-12345). באפליקציה
+    האמיתית — העלאת PDF מפעילה ניתוח של 20-40 שניות מול Azure OpenAI.
+  </div>
+</div>
+
+<!-- ════════════════ Results (hidden until Load Demo) ════════════════ -->
+<div id="results" class="hidden">
+
+<h3>2️⃣ תוצאות הניתוח</h3>
+
+<!-- Summary card -->
+<div class="summary-card">
+  <div class="demo-banner">
+    🎬 מצב דמו — תוצאה זו נטענה מקובץ דוגמה (לא נקראה ל-Azure).
+  </div>
+  <div class="summary-header">
+    <div class="summary-title">📋 תקציר ניתוח</div>
+    <span id="review-badge" class="review-badge badge-pending">⏳ ממתין ל-review</span>
+  </div>
+  <div class="pills" id="summary-pills">
+    <!-- populated by JS -->
+  </div>
+  <div style="margin-top:0.5em;" id="material-pill-container">
+    <!-- material pill -->
+  </div>
+  <div class="warning-summary">
+    <span style="color:#495057; font-weight:600; margin-left:0.4em;">⚠️ 2 אזהרות:</span>
+    <span class="sev-chip sev-medium">1 בינוניות</span>
+    <span class="sev-chip sev-low">1 מידע</span>
+  </div>
+</div>
+
+<!-- Drawing card detail (collapsible) -->
+<details open>
+  <summary>📋 פירוט מלא</summary>
+  <div class="detail-card">
+    <div style="font-size:1.1em; font-weight:700; color:#0d6efd; margin-bottom:0.5em; border-bottom:1px solid #cfe2ff; padding-bottom:0.3em;">
+      🎯 פרטי השרטוט
+    </div>
+    <div>
+      <span class="field-label">פריט:</span> <span class="field-value" id="dc-pn">AC-12345</span> &nbsp;·&nbsp;
+      <span class="field-label">שרטוט:</span> <span class="field-value" id="dc-dn">AC-12345</span> &nbsp;·&nbsp;
+      <span class="field-label">גרסה:</span> <span class="field-value" id="dc-rev">A</span> &nbsp;·&nbsp;
+      <span class="field-label">לקוח:</span> <span class="field-value" id="dc-cust">ACME Aerospace Inc.</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">חומר:</span> <span class="field-value" id="dc-mat">ALUMINUM ALLOY 6061-T6 PER AMS-QQ-A-250/11</span>
+      &nbsp;·&nbsp; <span class="field-label">תפקיד:</span> <span class="field-value">PART</span>
+      &nbsp;·&nbsp; <span class="field-label">כמות:</span> <span class="field-value">1</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">כותרת:</span> <span class="field-value">MOUNTING BRACKET — UPPER</span>
+      &nbsp;·&nbsp; <span class="field-label">CAGE:</span> <span class="field-value">AC001</span>
+      &nbsp;·&nbsp; <span class="field-label">משקל פריט:</span> <span class="field-value">0.31 kg</span>
+    </div>
+    <div class="field-row" style="font-style:italic; color:#495057;">
+      🔄 חומר חלופי מורשה: ALUMINUM ALLOY 7075-T651 PER AMS-QQ-A-250/12
+    </div>
+    <div class="field-row" style="font-style:italic; color:#6c757d;">
+      📜 תקנים מבוטלים (formerly): QQ-A-250/11 (obsolete — replaced by AMS-QQ-A-250/11)
+    </div>
+  </div>
+
+  <h4>🔧 עיבוד שבבי</h4>
+  <table>
+    <thead><tr><th>שלב</th><th>אנגלית</th><th>עברית</th><th>פרטים</th></tr></thead>
+    <tbody>
+      <tr><td>10</td><td class="ltr">ROUGH MILL</td><td>כירסום גס</td><td class="ltr">STOCK: 60 x 80 x 12 mm. Leave 0.5 mm finish allowance.</td></tr>
+      <tr><td>20</td><td class="ltr">FINISH MILL</td><td>כירסום גימור</td><td class="ltr">Finish all surfaces to 1.6 micron Ra.</td></tr>
+      <tr><td>30</td><td class="ltr">DEBURR</td><td>הסרת גרדים</td><td class="ltr">Manual deburr; break all sharp edges 0.2 mm max.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>🎨 ציפויים / טיפול שטח</h4>
+  <table>
+    <thead><tr><th>שלב</th><th>סוג (HE)</th><th>סוג (EN)</th><th>תיאור</th><th>תקן</th><th>RoHS</th></tr></thead>
+    <tbody>
+      <tr><td>40</td><td>ציפוי כרומט</td><td class="ltr">CHROMATE CONVERSION</td><td class="ltr">Class 1A clear chromate</td><td class="ltr">MIL-DTL-5541F</td><td></td></tr>
+    </tbody>
+  </table>
+
+  <h4>🖌️ צביעות</h4>
+  <table>
+    <thead><tr><th>שלב</th><th>סוג (HE)</th><th>תיאור</th><th>תקן</th><th>עובי</th><th>RoHS</th></tr></thead>
+    <tbody>
+      <tr><td>50</td><td>פריימר אפוקסי</td><td class="ltr">Two-component epoxy primer</td><td class="ltr">MIL-PRF-23377K</td><td>20-30µ</td><td>✓</td></tr>
+      <tr><td>60</td><td>פוליאוריתן עליון</td><td class="ltr">Polyurethane topcoat per MIL-PRF-85285</td><td class="ltr">MIL-PRF-85285E</td><td>50-75µ</td><td>✓</td></tr>
+    </tbody>
+  </table>
+
+  <h4>🔬 בדיקות NDT + סופיות</h4>
+  <table>
+    <thead><tr><th>שלב</th><th>אנגלית</th><th>עברית</th><th>פרטים</th></tr></thead>
+    <tbody>
+      <tr><td>70</td><td class="ltr">FLUORESCENT PENETRANT INSPECTION</td><td>בדיקה פלואורסצנטית חודרת</td><td class="ltr">Type I, Method C, Sensitivity Level 3 per ASTM E1417.</td></tr>
+      <tr><td>80</td><td class="ltr">DIMENSIONAL INSPECTION</td><td>בדיקת מימדים</td><td class="ltr">100% per drawing, CMM report required.</td></tr>
+      <tr><td>100</td><td class="ltr">QA STAMP + SERVICEABILITY TAG</td><td>חותמת QA + תג כשירות</td><td class="ltr">Approved by authorized inspector.</td></tr>
+    </tbody>
+  </table>
+
+  <h4>📜 תקנים שזוהו בשרטוט</h4>
+  <div id="dc-stds">
+    <code>AMS-QQ-A-250/11</code> ·
+    <code>MIL-DTL-5541F</code> ·
+    <code>MIL-PRF-23377K</code> ·
+    <code>MIL-PRF-85285E</code> ·
+    <code>ASTM E1417</code> ·
+    <code>RAL 7035</code>
+  </div>
+
+  <h4>📦 אריזה</h4>
+  <div style="background:#fff3cd; color:#664d03; padding:0.6em 0.9em; border-radius:0.4em; margin-bottom:0.4em;">
+    🇮🇱 <span id="dc-pkg-he">אריזה אנטי-סטטית בשקית ESD נפרדת. סימון חיצוני: P/N, REV, S/N.</span>
+  </div>
+  <div style="background:#fff3cd; color:#664d03; padding:0.6em 0.9em; border-radius:0.4em; direction:ltr; text-align:left;">
+    🇬🇧 <span id="dc-pkg-en">Pack in individual ESD bag. Outer marking: P/N, REV, S/N.</span>
+  </div>
+</details>
+
+<!-- Warnings -->
+<details open>
+  <summary>⚠️ 2 אזהרות ולידציה</summary>
+  <div class="warning-item">
+    <div>🟡 <b>POSSIBLE_OBSOLETE_SPEC</b> · <i>בינוני — שווה תשומת לב</i></div>
+    <div class="muted">מקור: <code>material</code> · ערך: <code>QQ-A-250/11 (formerly)</code></div>
+    <div><i>החומר מציין תקן QQ-A- ישן שהוחלף ב-AMS-QQ-A-. זוהה ככינוי 'formerly' — בדקי שהיצרן משתמש בתקן הנוכחי.</i></div>
+    <div class="warning-action">💡 <b>מה לבדוק:</b> התקן עלול להיות מוחלף — אמתו מול הלקוח.</div>
+  </div>
+  <div class="warning-item">
+    <div>🟢 <b>PACKING_NOTE</b> · <i>מידע בלבד</i></div>
+    <div class="muted">מקור: <code>packaging</code> · ערך: <code>ESD bag + outer marking</code></div>
+    <div><i>אריזת ESD נדרשת — ודאי שצוות האריזה מעודכן.</i></div>
+    <div class="warning-action">💡 <b>מה לבדוק:</b> ודאו שצוות האריזה מעודכן לדרישות.</div>
+  </div>
+</details>
+
+<!-- Review/Edit -->
+<h3>3️⃣ Review ואישור</h3>
+
+<div id="review-pending-section">
+  <div class="info-box">
+    💡 <b>לפני יצירת דוח:</b> עברי על השדות המרכזיים, תקני אם צריך, ולחצי 'אשר תוצאה'.
+    אם הכל נראה תקין — לחצי ישר אישור.
+    <span id="edits-count" class="hidden"></span>
+  </div>
+
+  <div class="card">
+    <h4 style="margin-top:0;">✏️ עריכת שדות מרכזיים</h4>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.6em;">
+      <div class="form-row">
+        <label for="ed-pn">P/N (Part Number) <span id="mark-pn" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-pn" type="text" value="AC-12345">
+      </div>
+      <div class="form-row">
+        <label for="ed-dn">DWG (Drawing Number) <span id="mark-dn" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-dn" type="text" value="AC-12345">
+      </div>
+      <div class="form-row">
+        <label for="ed-rev">Rev (Revision) <span id="mark-rev" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-rev" type="text" value="A">
+      </div>
+      <div class="form-row">
+        <label for="ed-cust">לקוח (Customer) <span id="mark-cust" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-cust" type="text" value="ACME Aerospace Inc.">
+      </div>
+      <div class="form-row">
+        <label for="ed-mat">חומר (Material) <span id="mark-mat" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-mat" type="text" value="ALUMINUM ALLOY 6061-T6 PER AMS-QQ-A-250/11">
+      </div>
+      <div class="form-row">
+        <label for="ed-qty">כמות (Quantity) <span id="mark-qty" class="edit-mark hidden">✏️ נערך</span></label>
+        <input id="ed-qty" type="text" value="1">
+      </div>
+    </div>
+    <div class="form-row">
+      <label for="ed-stds">תקנים (Standards) — מופרדים בפסיק</label>
+      <textarea id="ed-stds" rows="2">AMS-QQ-A-250/11, MIL-DTL-5541F, MIL-PRF-23377K, MIL-PRF-85285E, ASTM E1417, RAL 7035</textarea>
+    </div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.6em;">
+      <div class="form-row">
+        <label for="ed-pkg-he">הוראת אריזה (עברית)</label>
+        <textarea id="ed-pkg-he" rows="2">אריזה אנטי-סטטית בשקית ESD נפרדת. סימון חיצוני: P/N, REV, S/N.</textarea>
+      </div>
+      <div class="form-row">
+        <label for="ed-pkg-en">הוראת אריזה (English)</label>
+        <textarea id="ed-pkg-en" rows="2">Pack in individual ESD bag. Outer marking: P/N, REV, S/N.</textarea>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="saveEdits()">💾 שמור שינויים</button>
+    </div>
+  </div>
+
+  <div class="btn-row" style="margin-top:1em;">
+    <button class="btn btn-primary" onclick="approveResult()" style="max-width:300px;">
+      ✅ אשר תוצאה לייצוא
+    </button>
+    <div class="muted small" style="align-self:center; flex: 1;">
+      אישור התוצאה יסמן את הדוחות כעבר review ידני ויפתח את כפתורי הייצוא.
+    </div>
+  </div>
+</div>
+
+<div id="review-approved-section" class="hidden">
+  <div class="success-box">
+    ✅ התוצאה אושרה ע"י המשתמש <span id="review-time"></span>. הדוחות יסומנו כעבר review ידני.
+  </div>
+  <div class="btn-row">
+    <button class="btn" onclick="reEdit()" style="max-width:200px;">✏️ ערוך מחדש</button>
+  </div>
+</div>
+
+<!-- Export -->
+<h3>4️⃣ שמור תוצאה</h3>
+
+<div id="export-locked" class="warning-box">
+  ⏳ הייצוא ייפתח אחרי אישור התוצאה למעלה. אם אין צורך בעריכה — לחצי 'אשר תוצאה לייצוא'.
+</div>
+
+<div id="export-section" class="card">
+  <div class="tabs">
+    <div class="tab active" onclick="setTab('pdf')">📕 PDF מלא</div>
+    <div class="tab" onclick="setTab('xlsx')">📊 Excel מלא</div>
+    <div class="tab" onclick="setTab('json')">💾 JSON גולמי</div>
+  </div>
+  <div class="tab-content active" id="tab-pdf">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      דוח PDF מקיף: כותרת עם P/N ולקוח, חומר, תהליכים, ציפויים/צביעה, בדיקות, תקנים, NOTES.
+    </div>
+    <button id="export-pdf-btn" class="btn btn-primary" disabled onclick="fakeExport('PDF')">
+      📕 צור דוח PDF מלא
+    </button>
+  </div>
+  <div class="tab-content" id="tab-xlsx">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      Excel רב-גיליונות: סיכום, BOM, עיבוד שבבי, ריתוך, טיפול חום, ציפויים, צביעה, NDT,
+      בדיקות, אישור סופי, תקנים, תהליכים נוספים, עלויות.
+    </div>
+    <button id="export-xlsx-btn" class="btn btn-primary" disabled onclick="fakeExport('Excel')">
+      📊 צור Excel מלא
+    </button>
+  </div>
+  <div class="tab-content" id="tab-json">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      מבנה נתונים גולמי של הניתוח — מתאים לאינטגרציה, debugging, או ייצוא ידני.
+      JSON תמיד זמין (לא דורש אישור).
+    </div>
+    <button class="btn btn-primary" onclick="fakeExport('JSON')">
+      💾 שמור JSON
+    </button>
+  </div>
+</div>
+
+<div class="btn-row" style="margin-top: 1.5em;">
+  <button class="btn btn-secondary" onclick="resetDemo()" style="max-width:200px;">
+    🔄 התחל מחדש
+  </button>
+</div>
+
+</div> <!-- end #results -->
+
+</div> <!-- end #single-mode-section -->
+
+
+<!-- ════════════════════════════════════════════════════════════════════
+     ASSEMBLY MODE — Multi-drawing + relationship analysis
+     ════════════════════════════════════════════════════════════════════ -->
+<div id="assembly-mode-section" class="hidden">
+
+<!-- Empty state -->
+<div id="asm-empty-state" class="card">
+  <div style="font-size:1.25em; font-weight:700; color:#ea580c; margin-bottom:0.4em;">
+    נתחי מכלול שלם של שרטוטים — וקבלי עץ אבא/בן אוטומטי
+  </div>
+  <div style="color:#495057; line-height:1.7;">
+    • העלאת מספר PDFים יחד (assembly + parts) או תמונת Exploded View<br>
+    • ניתוח כל שרטוט בנפרד עם BOM וחומרים<br>
+    • <b>זיהוי אוטומטי של קשרי אבא/בן</b> בין השרטוטים — מי מכיל את מי, באיזו כמות<br>
+    • <b>אזהרת "Missing Children"</b> — איזה פריטי BOM לא הועלו כקובץ<br>
+    • ייצוא: דוח PDF מלא, דוח עץ מוצר, Excel מוכן ל-ERP
+  </div>
+</div>
+
+<!-- Upload + Demo for assembly -->
+<div class="card">
+  <h3>1️⃣ העלי מספר שרטוטים של מכלול</h3>
+  <div style="display:flex; gap:1em; align-items:center;">
+    <div style="flex: 1; padding: 1.2em; border: 2px dashed #ced4da; border-radius: 0.5em; text-align:center; color:#6c757d;">
+      📁 גררי מספר PDFים + תמונת Exploded View (מושבת בדמו)
+    </div>
+    <div style="text-align: center;">
+      <div class="muted small">או:</div>
+    </div>
+    <button class="btn btn-primary" onclick="loadAssemblyDemo()" id="load-asm-btn"
+            style="background:#ea580c; border-color:#ea580c;">
+      🎬 טען מכלול לדוגמה
+    </button>
+  </div>
+  <div class="muted small" style="margin-top: 0.6em;">
+    💡 בדמו: מכלול "Camera Mount System" — assembly + 3 parts + 2 פריטי BOM סטנדרטיים
+    שלא הועלו (יסומנו כ-Missing Children).
+  </div>
+</div>
+
+<!-- Results (hidden until Load Assembly Demo) -->
+<div id="asm-results" class="hidden">
+
+<h3>2️⃣ דפדוף בין שרטוטים</h3>
+
+<!-- Stats overview -->
+<div class="stats-row">
+  <div class="stat-box stat-success">
+    <div class="stat-num" id="asm-stat-files">4</div>
+    <div class="stat-label">קבצים נותחו</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num" id="asm-stat-bom">5</div>
+    <div class="stat-label">פריטי BOM סה"כ</div>
+  </div>
+  <div class="stat-box stat-warn">
+    <div class="stat-num" id="asm-stat-missing">2</div>
+    <div class="stat-label">Missing Children</div>
+  </div>
+  <div class="stat-box">
+    <div class="stat-num" id="asm-stat-cost">$0.21</div>
+    <div class="stat-label">עלות ניתוח</div>
+  </div>
+</div>
+
+<!-- Auto P/N corrections from BOM cross-reference -->
+<div class="info-box" id="asm-corrections-box">
+  🔧 <b>תיקון P/N אוטומטי:</b> נמצאה שגיאת OCR אחת ותוקנה אוטומטית מתוך BOM של שרטוט אחר:
+  <code>AC-12347</code> תוקן מ-<code>AC-1234?</code> (תו אחרון לא נקרא היטב — שוחזר מתוך BOM של ASSEMBLY).
+</div>
+
+<!-- Files list -->
+<div class="card">
+  <div class="card-title">📁 קבצים נותחו (4)</div>
+  <div id="asm-file-list">
+    <!-- populated by JS -->
+  </div>
+</div>
+
+<!-- Per-drawing summary card -->
+<div id="asm-per-drawing">
+  <h4 style="margin-top:1em;">📋 פרטי השרטוט הנבחר</h4>
+
+  <!-- Navigator -->
+  <div class="nav-bar">
+    <button class="btn nav-arrow" onclick="asmNav(-999)">⏮️ ראשון</button>
+    <button class="btn nav-arrow" onclick="asmNav(-1)">◀️ הקודם</button>
+    <select id="asm-jump" onchange="asmJump(this.value)"></select>
+    <button class="btn nav-arrow" onclick="asmNav(1)">▶️ הבא</button>
+    <button class="btn nav-arrow" onclick="asmNav(999)">⏭️ אחרון</button>
+  </div>
+
+  <div class="muted small" id="asm-current-info"></div>
+
+  <!-- Summary card per drawing -->
+  <div class="summary-card" id="asm-summary-card">
+    <!-- populated by JS -->
+  </div>
+
+  <!-- Drawing detail -->
+  <details>
+    <summary>📋 פירוט מלא של השרטוט הנוכחי</summary>
+    <div class="detail-card" id="asm-drawing-detail">
+      <!-- populated by JS -->
+    </div>
+  </details>
+</div>
+
+<!-- ═══════════════════════ Relationship analysis ═══════════════════════ -->
+<h3>3️⃣ ניתוח קשרי המכלול</h3>
+
+<div id="asm-rel-pending">
+  <div class="info-box">
+    💡 לחצי על הכפתור למטה כדי לבצע ניתוח חכם של קשרי אבא/בן בין כל השרטוטים.
+    הניתוח שולח את כל ה-BOM של כל שרטוט יחד למודל, וזה מזהה את ההיררכיה.
+  </div>
+  <button class="btn btn-primary" onclick="analyzeRelationships()" id="analyze-rel-btn"
+          style="background:#ea580c; border-color:#ea580c; padding: 0.8em 2em; font-size: 1.05em;">
+    🔗 נתח קשרי אבא/בן בין כל השרטוטים
+  </button>
+</div>
+
+<div id="asm-rel-results" class="hidden">
+
+  <!-- Hebrew summary -->
+  <div class="card" style="background:#fff5e6; border-color:#ea580c;">
+    <div class="card-title" style="color:#9a3412;">📝 סיכום ניתוח (עברית)</div>
+    <div id="asm-rel-summary"></div>
+  </div>
+
+  <!-- Tree visualization -->
+  <div class="card">
+    <div class="card-title">🌳 עץ המוצר</div>
+    <div id="asm-tree"></div>
+  </div>
+
+  <!-- Missing children -->
+  <div id="asm-missing-section">
+    <h4>⚠️ Missing Children</h4>
+    <div class="warning-box">
+      <b id="asm-missing-count"></b><br>
+      <div id="asm-missing-list"></div>
+      <div class="muted small" style="margin-top:0.5em;">
+        💡 רוב המקרים: אומדנים סטנדרטיים (ברגים, אומים) שלא דורשים שרטוט נפרד —
+        אבל חשוב לוודא שהם מתועדים אצל הקנייה.
+      </div>
+    </div>
+  </div>
+
+  <!-- Orphans (not used in this demo, but UI ready) -->
+  <div id="asm-orphans-section" class="hidden">
+    <h4>🔗 Orphans (שרטוטים בלי הורה)</h4>
+    <div class="warning-box">
+      <div id="asm-orphans-list"></div>
+    </div>
+  </div>
+
+  <!-- Validation warnings -->
+  <details>
+    <summary>⚠️ <span id="asm-rel-warnings-count">2</span> אזהרות ולידציה</summary>
+    <div id="asm-rel-warnings"></div>
+  </details>
+</div>
+
+<!-- Export -->
+<h3>4️⃣ הורדת דוחות</h3>
+<div class="card">
+  <div class="tabs">
+    <div class="tab active" onclick="setAsmTab('pdf-full')">📕 PDF מלא</div>
+    <div class="tab" onclick="setAsmTab('pdf-tree')">🌳 PDF עץ מקוצר</div>
+    <div class="tab" onclick="setAsmTab('xlsx-full')">📊 Excel מלא</div>
+    <div class="tab" onclick="setAsmTab('xlsx-tree')">📊 Excel עץ</div>
+  </div>
+  <div class="tab-content active" id="asm-tab-pdf-full">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      דוח PDF מקיף לכל שרטוט: כותרת, חומר, תהליכים, תקנים, NOTES, ובסוף ניתוח הקשרים.
+    </div>
+    <button class="btn btn-primary" onclick="fakeExport('PDF Full Assembly')">📕 צור דוח PDF מלא</button>
+  </div>
+  <div class="tab-content" id="asm-tab-pdf-tree">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      דוח PDF קצר: טבלת עץ מוצר + סכמה גרפית. ללא פירוט תהליכים.
+    </div>
+    <button class="btn btn-primary" onclick="fakeExport('PDF Tree')">🌳 צור דוח עץ מוצר</button>
+  </div>
+  <div class="tab-content" id="asm-tab-xlsx-full">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      Excel רב-גיליונות: סקירה, BOM, חומרים, תהליכים, תקנים — כולל גיליון "עץ מתמונה".
+    </div>
+    <button class="btn btn-primary" onclick="fakeExport('Excel Full')">📊 צור Excel מלא</button>
+  </div>
+  <div class="tab-content" id="asm-tab-xlsx-tree">
+    <div class="muted small" style="margin-bottom:0.6em;">
+      Excel עם עץ המוצר בגיליון Tree (פורמט נוח לייבוא ל-ERP).
+    </div>
+    <button class="btn btn-primary" onclick="fakeExport('Excel Tree')">📊 צור עץ ל-Excel</button>
+  </div>
+</div>
+
+<div class="btn-row" style="margin-top: 1.5em;">
+  <button class="btn btn-secondary" onclick="resetAsmDemo()" style="max-width:200px;">
+    🔄 התחל מחדש
+  </button>
+</div>
+
+</div> <!-- end #asm-results -->
+
+</div> <!-- end #assembly-mode-section -->
+
+
+<div class="footer">
+  AIDrawAnalyser · Interactive HTML Demo · קובץ עצמאי, לא דורש שרת ·
+  <a href="https://github.com/stolena2010-blip/AIDrawAnalyser" style="color:#0d6efd;">GitHub</a>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════
+// State
+// ═══════════════════════════════════════════════════
+const ORIGINAL = {
+  part_number: "AC-12345",
+  drawing_number: "AC-12345",
+  revision: "A",
+  customer: "ACME Aerospace Inc.",
+  material: "ALUMINUM ALLOY 6061-T6 PER AMS-QQ-A-250/11",
+  quantity: "1",
+  standards: "AMS-QQ-A-250/11, MIL-DTL-5541F, MIL-PRF-23377K, MIL-PRF-85285E, ASTM E1417, RAL 7035",
+  pkg_he: "אריזה אנטי-סטטית בשקית ESD נפרדת. סימון חיצוני: P/N, REV, S/N.",
+  pkg_en: "Pack in individual ESD bag. Outer marking: P/N, REV, S/N.",
+};
+
+const FIELD_TO_PILL = {
+  part_number: "Part Number",
+  drawing_number: "Drawing Number",
+  revision: "Revision",
+  customer: "Customer",
+  material: "Material",
+};
+
+let state = {
+  status: "pending",  // pending | edited | reviewed
+  edits: {},
+  reviewedAt: null,
+};
+
+// ═══════════════════════════════════════════════════
+// UI rendering
+// ═══════════════════════════════════════════════════
+function renderSummaryPills() {
+  const fields = [
+    { key: "part_number", label: "Part Number" },
+    { key: "drawing_number", label: "Drawing Number" },
+    { key: "revision", label: "Revision" },
+    { key: "customer", label: "Customer" },
+  ];
+  const pillsHtml = fields.map(f => {
+    const value = currentValue(f.key) || "—";
+    const edited = f.key in state.edits;
+    return `<div class="pill ${edited ? "pill-edited" : ""}">
+      <div class="pill-label">${f.label}${edited ? ' <span style="color:#d48806;">✏️</span>' : ""}</div>
+      <div class="pill-value">${escapeHtml(value)}</div>
+    </div>`;
+  }).join("");
+  // Role pill is fixed (not editable in demo)
+  const rolePill = `<div class="pill">
+    <div class="pill-label">Role</div>
+    <div class="pill-value">PART</div>
+  </div>`;
+  document.getElementById("summary-pills").innerHTML = pillsHtml + rolePill;
+
+  // Material pill (separate row)
+  const matEdited = "material" in state.edits;
+  document.getElementById("material-pill-container").innerHTML = `<div class="pill ${matEdited ? "pill-edited" : ""}">
+    <div class="pill-label">Material${matEdited ? ' <span style="color:#d48806;">✏️</span>' : ""}</div>
+    <div class="pill-value">${escapeHtml(currentValue("material"))}</div>
+  </div>`;
+}
+
+function renderReviewBadge() {
+  const badge = document.getElementById("review-badge");
+  if (state.status === "reviewed") {
+    const when = state.reviewedAt
+      ? ` · ${state.reviewedAt.toISOString().slice(0, 19).replace("T", " ")}`
+      : "";
+    badge.className = "review-badge badge-reviewed";
+    badge.textContent = `✅ אושר ע"י משתמש${when}`;
+  } else if (state.status === "edited") {
+    badge.className = "review-badge badge-edited";
+    badge.textContent = "✏️ נערך · ממתין לאישור";
+  } else {
+    badge.className = "review-badge badge-pending";
+    badge.textContent = "⏳ ממתין ל-review";
+  }
+}
+
+function renderDetailCard() {
+  // Update detail card with current values
+  document.getElementById("dc-pn").textContent = currentValue("part_number");
+  document.getElementById("dc-dn").textContent = currentValue("drawing_number");
+  document.getElementById("dc-rev").textContent = currentValue("revision");
+  document.getElementById("dc-cust").textContent = currentValue("customer");
+  document.getElementById("dc-mat").textContent = currentValue("material");
+
+  // Standards
+  const stds = currentValue("standards").split(",").map(s => s.trim()).filter(s => s);
+  document.getElementById("dc-stds").innerHTML = stds.map(s => `<code>${escapeHtml(s)}</code>`).join(" · ");
+
+  // Packaging
+  document.getElementById("dc-pkg-he").textContent = currentValue("pkg_he");
+  document.getElementById("dc-pkg-en").textContent = currentValue("pkg_en");
+}
+
+function renderEditMarks() {
+  ["pn", "dn", "rev", "cust", "mat", "qty"].forEach(short => {
+    const fieldMap = { pn: "part_number", dn: "drawing_number", rev: "revision", cust: "customer", mat: "material", qty: "quantity" };
+    const mark = document.getElementById("mark-" + short);
+    if (!mark) return;
+    if (fieldMap[short] in state.edits) {
+      mark.classList.remove("hidden");
+    } else {
+      mark.classList.add("hidden");
+    }
+  });
+  const editsCount = Object.keys(state.edits).length;
+  const note = document.getElementById("edits-count");
+  if (editsCount > 0) {
+    note.classList.remove("hidden");
+    note.textContent = ` 📝 ערכת עד עתה ${editsCount} שדות.`;
+  } else {
+    note.classList.add("hidden");
+  }
+}
+
+function renderApprovedState() {
+  const pendingSection = document.getElementById("review-pending-section");
+  const approvedSection = document.getElementById("review-approved-section");
+  const exportLocked = document.getElementById("export-locked");
+  const pdfBtn = document.getElementById("export-pdf-btn");
+  const xlsxBtn = document.getElementById("export-xlsx-btn");
+
+  if (state.status === "reviewed") {
+    pendingSection.classList.add("hidden");
+    approvedSection.classList.remove("hidden");
+    exportLocked.classList.add("hidden");
+    pdfBtn.disabled = false;
+    xlsxBtn.disabled = false;
+    if (state.reviewedAt) {
+      document.getElementById("review-time").textContent =
+        "ב-" + state.reviewedAt.toISOString().slice(0, 19).replace("T", " ");
+    }
+  } else {
+    pendingSection.classList.remove("hidden");
+    approvedSection.classList.add("hidden");
+    exportLocked.classList.remove("hidden");
+    pdfBtn.disabled = true;
+    xlsxBtn.disabled = true;
+  }
+}
+
+function renderAll() {
+  renderSummaryPills();
+  renderReviewBadge();
+  renderDetailCard();
+  renderEditMarks();
+  renderApprovedState();
+}
+
+// ═══════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════
+function currentValue(key) {
+  // If user edited it, return the edit. Else return original.
+  if (key in state.edits) return state.edits[key];
+  return ORIGINAL[key] || "";
+}
+
+function escapeHtml(s) {
+  const div = document.createElement("div");
+  div.textContent = String(s || "");
+  return div.innerHTML;
+}
+
+// ═══════════════════════════════════════════════════
+// Actions
+// ═══════════════════════════════════════════════════
+function loadDemo() {
+  document.getElementById("empty-state").classList.add("hidden");
+  document.getElementById("results").classList.remove("hidden");
+  document.getElementById("load-demo-btn").textContent = "🎬 דוגמה נטענה";
+  document.getElementById("load-demo-btn").disabled = true;
+  state = { status: "pending", edits: {}, reviewedAt: null };
+  renderAll();
+  document.getElementById("results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function saveEdits() {
+  const fieldMap = {
+    "ed-pn": "part_number", "ed-dn": "drawing_number", "ed-rev": "revision",
+    "ed-cust": "customer", "ed-mat": "material", "ed-qty": "quantity",
+    "ed-stds": "standards", "ed-pkg-he": "pkg_he", "ed-pkg-en": "pkg_en",
+  };
+  let changes = 0;
+  for (const [inputId, key] of Object.entries(fieldMap)) {
+    const el = document.getElementById(inputId);
+    const newVal = el.value.trim();
+    const original = ORIGINAL[key] || "";
+    if (newVal !== original) {
+      state.edits[key] = newVal;
+      changes++;
+    } else if (key in state.edits) {
+      delete state.edits[key];
+    }
+  }
+  if (changes > 0 || Object.keys(state.edits).length > 0) {
+    state.status = Object.keys(state.edits).length > 0 ? "edited" : "pending";
+    state.reviewedAt = null;
+  }
+  renderAll();
+  if (changes > 0) {
+    flashMessage(`✅ נשמרו ${Object.keys(state.edits).length} שינויים`);
+  } else {
+    flashMessage("ℹ️ אין שינויים לשמירה", "muted");
+  }
+}
+
+function approveResult() {
+  state.status = "reviewed";
+  state.reviewedAt = new Date();
+  renderAll();
+  document.getElementById("review-approved-section").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+function reEdit() {
+  state.status = Object.keys(state.edits).length > 0 ? "edited" : "pending";
+  state.reviewedAt = null;
+  renderAll();
+}
+
+function resetDemo() {
+  if (!confirm("לאפס את הדמו ולהתחיל מחדש?")) return;
+  state = { status: "pending", edits: {}, reviewedAt: null };
+  // Reset form values
+  for (const key in ORIGINAL) {
+    const inputMap = {
+      part_number: "ed-pn", drawing_number: "ed-dn", revision: "ed-rev",
+      customer: "ed-cust", material: "ed-mat", quantity: "ed-qty",
+      standards: "ed-stds", pkg_he: "ed-pkg-he", pkg_en: "ed-pkg-en",
+    };
+    const el = document.getElementById(inputMap[key]);
+    if (el) el.value = ORIGINAL[key];
+  }
+  document.getElementById("results").classList.add("hidden");
+  document.getElementById("empty-state").classList.remove("hidden");
+  document.getElementById("load-demo-btn").textContent = "🎬 טען דוגמה";
+  document.getElementById("load-demo-btn").disabled = false;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function setTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll(".tab-content").forEach(t => t.classList.remove("active"));
+  event.target.classList.add("active");
+  document.getElementById("tab-" + name).classList.add("active");
+}
+
+function fakeExport(kind) {
+  const fname = `AC-12345_${new Date().toISOString().slice(0,10).replace(/-/g, "")}_demo.${kind.toLowerCase()}`;
+  const status = state.status === "reviewed" ? "✅ עבר review ידני" : "⚠️ ייצוא AI גולמי (לא עבר review)";
+  alert(`💾 ${kind} דוגמה היה נוצר עכשיו:\n\n${fname}\n\nסטטוס: ${status}\n\nבאפליקציה האמיתית — הקובץ ייווצר באמת ויהיה ניתן להורדה.`);
+}
+
+function flashMessage(text, cls) {
+  const note = document.createElement("div");
+  note.className = "info-box";
+  note.style.position = "fixed";
+  note.style.top = "20px";
+  note.style.left = "50%";
+  note.style.transform = "translateX(-50%)";
+  note.style.zIndex = "9999";
+  note.style.minWidth = "260px";
+  note.style.textAlign = "center";
+  note.textContent = text;
+  document.body.appendChild(note);
+  setTimeout(() => note.remove(), 2000);
+}
+
+// Initial render (in case page reloaded with state — for now, just baseline)
+renderAll();
+
+
+// ═══════════════════════════════════════════════════════════════════
+// ASSEMBLY MODE
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Demo data: 4 drawings + relationships ───
+const ASM_DRAWINGS = [
+  {
+    source_filename: "ACME-MOUNT-001.pdf",
+    part_number: "ACME-MOUNT-001",
+    drawing_number: "ACME-MOUNT-001",
+    revision: "B",
+    customer: "ACME Aerospace Inc.",
+    material: "ASSEMBLY (no raw material)",
+    quantity: "1",
+    assembly_role: "ASSEMBLY",
+    title: "CAMERA MOUNT SYSTEM - TOP LEVEL",
+    bom_items: [
+      { item_no: "1", part_number: "AC-12345", description: "MOUNTING BRACKET (UPPER)", qty: "1" },
+      { item_no: "2", part_number: "AC-12346", description: "MOUNTING PLATE (LOWER)", qty: "1" },
+      { item_no: "3", part_number: "AC-12347", description: "CAMERA BRACKET", qty: "1" },
+      { item_no: "4", part_number: "AC-FAS-M5x20", description: "M5x20 HEX SOCKET CAP SCREW", qty: "4" },
+      { item_no: "5", part_number: "AC-FAS-M5W", description: "M5 LOCK WASHER", qty: "4" },
+    ],
+    standards: ["AS9100 Rev D"],
+    notes: "Top-level assembly drawing. Sub-assemblies and parts per BOM.",
+    _validation_warnings: [],
+    _ocr_used: true,
+  },
+  {
+    source_filename: "AC-12345.pdf",
+    part_number: "AC-12345",
+    drawing_number: "AC-12345",
+    revision: "A",
+    customer: "ACME Aerospace Inc.",
+    material: "ALUMINUM ALLOY 6061-T6 PER AMS-QQ-A-250/11",
+    quantity: "1",
+    assembly_role: "PART",
+    title: "MOUNTING BRACKET — UPPER",
+    bom_items: [],
+    standards: ["AMS-QQ-A-250/11", "MIL-DTL-5541F", "MIL-PRF-23377K"],
+    notes: "ESD HANDLING REQUIRED. PRIMER + TOPCOAT RAL 7035.",
+    _validation_warnings: [
+      { type: "POSSIBLE_OBSOLETE_SPEC", severity: "MEDIUM", source: "material",
+        value: "QQ-A-250/11", message: "תקן QQ-A- ישן — הוחלף ב-AMS-QQ-A-." },
+    ],
+    _ocr_used: true,
+  },
+  {
+    source_filename: "AC-12346.pdf",
+    part_number: "AC-12346",
+    drawing_number: "AC-12346",
+    revision: "C",
+    customer: "ACME Aerospace Inc.",
+    material: "STAINLESS STEEL 316L PER ASTM A240",
+    quantity: "1",
+    assembly_role: "PART",
+    title: "MOUNTING PLATE — LOWER",
+    bom_items: [],
+    standards: ["ASTM A240", "AS9100 Rev D"],
+    notes: "PASSIVATION PER ASTM A967.",
+    _validation_warnings: [],
+    _ocr_used: false,
+  },
+  {
+    source_filename: "AC-12347.pdf",
+    part_number: "AC-12347",
+    drawing_number: "AC-12347",
+    revision: "A",
+    customer: "ACME Aerospace Inc.",
+    material: "ALUMINUM ALLOY 7075-T651 PER AMS-QQ-A-250/12",
+    quantity: "1",
+    assembly_role: "PART",
+    title: "CAMERA BRACKET",
+    bom_items: [],
+    standards: ["AMS-QQ-A-250/12", "MIL-DTL-5541F", "MIL-PRF-85285E"],
+    notes: "BLACK ANODIZE PER MIL-A-8625 TYPE II CLASS 2.",
+    _validation_warnings: [
+      { type: "RAL_NONSTANDARD", severity: "LOW", source: "color",
+        value: "BLACK ANODIZE", message: "צבע אנודייז — לא RAL סטנדרטי. תקין למוצר זה." },
+    ],
+    _ocr_used: true,
+  },
+];
+
+// ─── Demo relationships output ───
+const ASM_RELATIONSHIPS = {
+  summary_he: (
+    "מכלול 'CAMERA MOUNT SYSTEM' (ACME-MOUNT-001 Rev B) כולל 5 פריטי BOM: " +
+    "3 חלקים מותאמים (Mounting Bracket Upper, Mounting Plate Lower, Camera Bracket) " +
+    "ו-2 אומדנים סטנדרטיים (M5x20 ברגים ⨯ 4 + M5 דיסקיות נעילה ⨯ 4). " +
+    "כל 3 החלקים המותאמים הועלו וזוהו. האומדנים הסטנדרטיים לא הועלו — " +
+    "סביר שהם לא דורשים שרטוט נפרד. החומרים מגוונים (Al 6061 / SS 316L / Al 7075) " +
+    "ומתאימים ליישום סביבתי (anti-corrosion + ESD handling)."
+  ),
+  assemblies: [
+    {
+      parent_part_number: "ACME-MOUNT-001",
+      parent_drawing_number: "ACME-MOUNT-001",
+      parent_description: "CAMERA MOUNT SYSTEM - TOP LEVEL",
+      children: [
+        { part_number: "AC-12345", drawing_number: "AC-12345",
+          description: "MOUNTING BRACKET (UPPER)", qty: "1", uploaded: true },
+        { part_number: "AC-12346", drawing_number: "AC-12346",
+          description: "MOUNTING PLATE (LOWER)", qty: "1", uploaded: true },
+        { part_number: "AC-12347", drawing_number: "AC-12347",
+          description: "CAMERA BRACKET", qty: "1", uploaded: true },
+        { part_number: "AC-FAS-M5x20", drawing_number: "",
+          description: "M5x20 HEX SOCKET CAP SCREW", qty: "4", uploaded: false },
+        { part_number: "AC-FAS-M5W", drawing_number: "",
+          description: "M5 LOCK WASHER", qty: "4", uploaded: false },
+      ],
+    },
+  ],
+  orphans: [],
+  missing_children: [
+    { part_number: "AC-FAS-M5x20", description: "M5x20 HEX SOCKET CAP SCREW", qty: "4",
+      parent: "ACME-MOUNT-001" },
+    { part_number: "AC-FAS-M5W", description: "M5 LOCK WASHER", qty: "4",
+      parent: "ACME-MOUNT-001" },
+  ],
+  warnings_he: [
+    {
+      type: "MIXED_MATERIALS",
+      severity: "LOW",
+      message: "המכלול כולל 3 חומרים שונים (Al 6061 / SS 316L / Al 7075). " +
+               "ודאי שאין בעיית גלוון בחיבורים בין SS ל-Al."
+    },
+    {
+      type: "MISSING_FASTENER_DRAWINGS",
+      severity: "LOW",
+      message: "שני אומדנים סטנדרטיים ב-BOM (ברגים, דיסקיות) ללא שרטוט. " +
+               "סביר ולא חוסם — אומדנים סטנדרטיים בדרך כלל מצויינים בקטלוג."
+    },
+  ],
+};
+
+let asmState = {
+  loaded: false,
+  currentIdx: 0,
+  relationshipsAnalyzed: false,
+};
+
+// ─── Mode toggle ───
+function switchMode(mode) {
+  const single = document.getElementById("single-mode-section");
+  const assembly = document.getElementById("assembly-mode-section");
+  const bannerSingle = document.getElementById("mode-banner-single");
+  const bannerAsm = document.getElementById("mode-banner-assembly");
+  const btnSingle = document.getElementById("mode-btn-single");
+  const btnAsm = document.getElementById("mode-btn-assembly");
+  if (mode === "single") {
+    single.classList.remove("hidden");
+    assembly.classList.add("hidden");
+    bannerSingle.classList.remove("hidden");
+    bannerAsm.classList.add("hidden");
+    btnSingle.classList.add("mode-btn-active");
+    btnAsm.classList.remove("mode-btn-active");
+    document.body.removeAttribute("data-mode");
+  } else {
+    single.classList.add("hidden");
+    assembly.classList.remove("hidden");
+    bannerSingle.classList.add("hidden");
+    bannerAsm.classList.remove("hidden");
+    btnSingle.classList.remove("mode-btn-active");
+    btnAsm.classList.add("mode-btn-active");
+    document.body.setAttribute("data-mode", "assembly");
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// ─── Load assembly demo ───
+function loadAssemblyDemo() {
+  document.getElementById("asm-empty-state").classList.add("hidden");
+  document.getElementById("asm-results").classList.remove("hidden");
+  document.getElementById("load-asm-btn").textContent = "🎬 דוגמה נטענה";
+  document.getElementById("load-asm-btn").disabled = true;
+  asmState = { loaded: true, currentIdx: 0, relationshipsAnalyzed: false };
+  renderAsmFileList();
+  renderAsmJump();
+  renderAsmCurrentDrawing();
+  document.getElementById("asm-results").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function renderAsmFileList() {
+  const list = document.getElementById("asm-file-list");
+  list.innerHTML = ASM_DRAWINGS.map((d, i) => `
+    <div class="file-row ${i === asmState.currentIdx ? "active" : ""}" onclick="asmJump(${i})">
+      <span class="file-icon">${d.assembly_role === "ASSEMBLY" ? "🧩" : "🔧"}</span>
+      <span><b>${escapeHtml(d.part_number)}</b> Rev ${escapeHtml(d.revision)} —
+        ${escapeHtml(d.title)}</span>
+      <span class="file-status">${d.assembly_role === "ASSEMBLY" ? "Assembly" : "Part"}</span>
+    </div>
+  `).join("");
+}
+
+function renderAsmJump() {
+  const sel = document.getElementById("asm-jump");
+  sel.innerHTML = ASM_DRAWINGS.map((d, i) =>
+    `<option value="${i}">${i + 1}. ${escapeHtml(d.part_number)} — ${escapeHtml(d.title)}</option>`
+  ).join("");
+  sel.value = asmState.currentIdx;
+}
+
+function asmNav(delta) {
+  const n = ASM_DRAWINGS.length;
+  let next = asmState.currentIdx + delta;
+  if (delta === -999) next = 0;
+  if (delta === 999) next = n - 1;
+  if (next < 0) next = 0;
+  if (next >= n) next = n - 1;
+  asmState.currentIdx = next;
+  renderAsmFileList();
+  renderAsmJump();
+  renderAsmCurrentDrawing();
+}
+
+function asmJump(idx) {
+  asmState.currentIdx = parseInt(idx);
+  renderAsmFileList();
+  renderAsmJump();
+  renderAsmCurrentDrawing();
+}
+
+function renderAsmCurrentDrawing() {
+  const d = ASM_DRAWINGS[asmState.currentIdx];
+  const total = ASM_DRAWINGS.length;
+  document.getElementById("asm-current-info").innerHTML =
+    `📄 שרטוט <b>${asmState.currentIdx + 1}</b> מתוך <b>${total}</b> · <code>${escapeHtml(d.source_filename)}</code>`;
+
+  // Summary card
+  const warnings = d._validation_warnings || [];
+  const sevCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0, LOW: 0 };
+  warnings.forEach(w => {
+    const s = (w.severity || "LOW").toUpperCase();
+    if (s in sevCounts) sevCounts[s]++; else sevCounts.LOW++;
+  });
+  const sevChips = [];
+  if (sevCounts.CRITICAL) sevChips.push(`<span class="sev-chip sev-critical">${sevCounts.CRITICAL} קריטיות</span>`);
+  if (sevCounts.HIGH) sevChips.push(`<span class="sev-chip sev-high">${sevCounts.HIGH} גבוהות</span>`);
+  if (sevCounts.MEDIUM) sevChips.push(`<span class="sev-chip sev-medium">${sevCounts.MEDIUM} בינוניות</span>`);
+  if (sevCounts.LOW) sevChips.push(`<span class="sev-chip sev-low">${sevCounts.LOW} מידע</span>`);
+  const warnHtml = warnings.length === 0
+    ? '<span style="color:#198754; font-weight:600;">✅ אין אזהרות ולידציה</span>'
+    : `<span style="color:#495057; font-weight:600; margin-left:0.4em;">⚠️ ${warnings.length} אזהרות:</span>` + sevChips.join("");
+
+  const pillsHtml = [
+    summaryPill("Part Number", d.part_number),
+    summaryPill("Drawing Number", d.drawing_number),
+    summaryPill("Revision", d.revision),
+    summaryPill("Customer", d.customer),
+    summaryPill("Role", d.assembly_role),
+  ].join("");
+
+  document.getElementById("asm-summary-card").innerHTML = `
+    <div class="summary-header">
+      <div class="summary-title" style="color:#ea580c;">📋 ${escapeHtml(d.title)}</div>
+      <span class="review-badge badge-pending">⏳ ממתין ל-review</span>
+    </div>
+    <div class="pills">${pillsHtml}</div>
+    <div style="margin-top:0.5em;">${summaryPill("Material", d.material)}</div>
+    <div class="warning-summary">${warnHtml}</div>
+  `;
+
+  // Detail card
+  const bomHtml = d.bom_items && d.bom_items.length
+    ? `<h4 style="margin:0.6em 0 0.4em 0;">📋 טבלת חלקים (BOM)</h4>
+       <table>
+         <thead><tr><th>Item</th><th>Part Number</th><th>Description</th><th>Qty</th></tr></thead>
+         <tbody>${d.bom_items.map(b => `
+           <tr>
+             <td>${escapeHtml(b.item_no)}</td>
+             <td class="ltr">${escapeHtml(b.part_number)}</td>
+             <td class="ltr">${escapeHtml(b.description)}</td>
+             <td>${escapeHtml(b.qty)}</td>
+           </tr>`).join("")}
+         </tbody>
+       </table>`
+    : "";
+  const stdsHtml = (d.standards || []).map(s => `<code>${escapeHtml(s)}</code>`).join(" · ");
+  document.getElementById("asm-drawing-detail").innerHTML = `
+    <div style="font-size:1.1em; font-weight:700; color:#ea580c; margin-bottom:0.5em; border-bottom:1px solid #fed7aa; padding-bottom:0.3em;">
+      🎯 פרטי השרטוט
+    </div>
+    <div>
+      <span class="field-label">פריט:</span> <span class="field-value">${escapeHtml(d.part_number)}</span> &nbsp;·&nbsp;
+      <span class="field-label">שרטוט:</span> <span class="field-value">${escapeHtml(d.drawing_number)}</span> &nbsp;·&nbsp;
+      <span class="field-label">גרסה:</span> <span class="field-value">${escapeHtml(d.revision)}</span> &nbsp;·&nbsp;
+      <span class="field-label">לקוח:</span> <span class="field-value">${escapeHtml(d.customer)}</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">חומר:</span> <span class="field-value">${escapeHtml(d.material)}</span>
+      &nbsp;·&nbsp; <span class="field-label">תפקיד:</span> <span class="field-value">${escapeHtml(d.assembly_role)}</span>
+      &nbsp;·&nbsp; <span class="field-label">כמות:</span> <span class="field-value">${escapeHtml(d.quantity)}</span>
+    </div>
+    <div class="field-row">
+      <span class="field-label">הערות:</span> <span style="font-style:italic;">${escapeHtml(d.notes)}</span>
+    </div>
+    ${bomHtml}
+    ${stdsHtml ? `<h4 style="margin:0.6em 0 0.4em 0;">📜 תקנים</h4><div>${stdsHtml}</div>` : ""}
+  `;
+}
+
+function summaryPill(label, value) {
+  return `<div class="pill">
+    <div class="pill-label">${label}</div>
+    <div class="pill-value">${escapeHtml(value || "—")}</div>
+  </div>`;
+}
+
+// ─── Analyze relationships ───
+function analyzeRelationships() {
+  const btn = document.getElementById("analyze-rel-btn");
+  btn.disabled = true;
+  btn.textContent = "⏳ מנתח...";
+  setTimeout(() => {
+    asmState.relationshipsAnalyzed = true;
+    document.getElementById("asm-rel-pending").classList.add("hidden");
+    document.getElementById("asm-rel-results").classList.remove("hidden");
+    renderRelationships();
+    document.getElementById("asm-rel-results").scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 600);
+}
+
+function renderRelationships() {
+  const rel = ASM_RELATIONSHIPS;
+
+  // Hebrew summary
+  document.getElementById("asm-rel-summary").textContent = rel.summary_he;
+
+  // Tree
+  const treeHtml = rel.assemblies.map(asm => {
+    const childrenHtml = asm.children.map(c => {
+      const status = c.uploaded
+        ? '<span class="tree-status tree-status-uploaded">✓ הועלה</span>'
+        : '<span class="tree-status tree-status-missing">✗ לא הועלה</span>';
+      const cls = c.uploaded ? "tree-uploaded" : "tree-missing";
+      return `
+        <div class="tree-node tree-child ${cls}">
+          <div>
+            <span style="font-weight:600;">${escapeHtml(c.part_number)}</span>
+            ${status}
+            <span class="tree-link">⨯ ${escapeHtml(c.qty)}</span>
+          </div>
+          <div class="muted small" style="margin-top:0.2em;">${escapeHtml(c.description)}</div>
+        </div>
+      `;
+    }).join("");
+    return `
+      <div class="tree-node tree-root">
+        <div>🧩 <b>${escapeHtml(asm.parent_part_number)}</b> — ${escapeHtml(asm.parent_description)}</div>
+        <div class="muted small" style="margin-top:0.2em;">
+          ${asm.children.length} פריטי BOM ·
+          ${asm.children.filter(c => c.uploaded).length} הועלו ·
+          ${asm.children.filter(c => !c.uploaded).length} חסרים
+        </div>
+      </div>
+      ${childrenHtml}
+    `;
+  }).join("");
+  document.getElementById("asm-tree").innerHTML = treeHtml;
+
+  // Missing children
+  if (rel.missing_children && rel.missing_children.length) {
+    document.getElementById("asm-missing-section").classList.remove("hidden");
+    document.getElementById("asm-missing-count").textContent =
+      `נמצאו ${rel.missing_children.length} פריטי BOM ללא שרטוט מתאים שהועלה:`;
+    document.getElementById("asm-missing-list").innerHTML = rel.missing_children.map(m => `
+      <div style="margin: 0.4em 0; padding: 0.4em 0.6em; background:white; border-radius:0.3em;">
+        <b>${escapeHtml(m.part_number)}</b> — ${escapeHtml(m.description)}
+        <span class="tree-link">⨯ ${escapeHtml(m.qty)}</span>
+        <span class="muted small">(הורה: ${escapeHtml(m.parent)})</span>
+      </div>
+    `).join("");
+  } else {
+    document.getElementById("asm-missing-section").classList.add("hidden");
+  }
+
+  // Validation warnings
+  const warns = rel.warnings_he || [];
+  document.getElementById("asm-rel-warnings-count").textContent = warns.length;
+  document.getElementById("asm-rel-warnings").innerHTML = warns.map(w => {
+    const sev = (w.severity || "LOW").toUpperCase();
+    const sevIcon = { CRITICAL: "🔴", HIGH: "🟠", MEDIUM: "🟡", LOW: "🟢" }[sev] || "⚪";
+    return `
+      <div class="warning-item">
+        <div>${sevIcon} <b>${escapeHtml(w.type)}</b></div>
+        <div><i>${escapeHtml(w.message)}</i></div>
+      </div>
+    `;
+  }).join("");
+}
+
+function setAsmTab(name) {
+  document.querySelectorAll("#assembly-mode-section .tab").forEach(t => t.classList.remove("active"));
+  document.querySelectorAll("#assembly-mode-section .tab-content").forEach(t => t.classList.remove("active"));
+  event.target.classList.add("active");
+  document.getElementById("asm-tab-" + name).classList.add("active");
+}
+
+function resetAsmDemo() {
+  if (!confirm("לאפס את דמו המכלול ולהתחיל מחדש?")) return;
+  asmState = { loaded: false, currentIdx: 0, relationshipsAnalyzed: false };
+  document.getElementById("asm-results").classList.add("hidden");
+  document.getElementById("asm-empty-state").classList.remove("hidden");
+  document.getElementById("load-asm-btn").textContent = "🎬 טען מכלול לדוגמה";
+  document.getElementById("load-asm-btn").disabled = false;
+  document.getElementById("asm-rel-pending").classList.remove("hidden");
+  document.getElementById("asm-rel-results").classList.add("hidden");
+  const btn = document.getElementById("analyze-rel-btn");
+  btn.disabled = false;
+  btn.textContent = "🔗 נתח קשרי אבא/בן בין כל השרטוטים";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+</script>
+
+</body>
+</html>

@@ -81,6 +81,5 @@ jobs:
       - name: Install ruff
         run: pip install ruff
 
-      - name: Run ruff (non-blocking)
+      - name: Run ruff (blocking)
         run: ruff check core/ storage/ tests/ app.py ui_assembly.py --output-format=github
-        continue-on-error: true

@@ -1,16 +1,16 @@
 """
 המרת PDF לתמונות base64 לצורך שליחה ל-Vision API.
-משתמש ב-PyMuPDF (fitz) — לא דורש בינארים חיצוניים (Poppler).
+משתמש ב-pypdfium2 (Apache 2.0) — לא דורש בינארים חיצוניים (Poppler).
 """
 import base64
 import io
 import os
 from pathlib import Path
 
-import fitz  # PyMuPDF
+import pypdfium2 as pdfium
 from PIL import Image
 
-from .exceptions import PDFError, ImageError
+from .exceptions import ImageError, PDFError
 
 # ───────────────────────────────────────────────────────────────
 # מגבלות קלט — מגינות מפני קבצים שאין להם הצדקה עסקית.
@@ -72,13 +72,13 @@ def _validate_pdf_source(pdf_source) -> None:
 
 
 def _render_pdf_to_pil(pdf_source, dpi: int = 200) -> list[Image.Image]:
-    """ממיר PDF לרשימת תמונות PIL באמצעות PyMuPDF."""
+    """ממיר PDF לרשימת תמונות PIL באמצעות pypdfium2."""
     _validate_pdf_source(pdf_source)
     try:
         if isinstance(pdf_source, (str, Path)):
-            doc = fitz.open(str(pdf_source))
+            doc = pdfium.PdfDocument(str(pdf_source))
         else:
-            doc = fitz.open(stream=pdf_source, filetype="pdf")
+            doc = pdfium.PdfDocument(bytes(pdf_source))
     except PDFError:
         raise
     except Exception as exc:
@@ -91,8 +91,8 @@ def _render_pdf_to_pil(pdf_source, dpi: int = 200) -> list[Image.Image]:
         ) from exc
 
     # בדיקת page_count אחרי פתיחה — לפני שמתחילים render יקר.
-    if len(doc) > MAX_PDF_PAGES:
-        page_count = len(doc)
+    page_count = len(doc)
+    if page_count > MAX_PDF_PAGES:
         doc.close()
         name = Path(pdf_source).name if isinstance(pdf_source, (str, Path)) else "PDF"
         raise PDFError(
@@ -108,14 +108,15 @@ def _render_pdf_to_pil(pdf_source, dpi: int = 200) -> list[Image.Image]:
             context={"page_count": page_count, "limit": MAX_PDF_PAGES},
         )
 
-    zoom = dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom)
+    scale = dpi / 72.0
 
     images: list[Image.Image] = []
     try:
         for page in doc:
-            pix = page.get_pixmap(matrix=matrix, alpha=False)
-            img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            bitmap = page.render(scale=scale, rotation=0)
+            img = bitmap.to_pil()
+            if img.mode != "RGB":
+                img = img.convert("RGB")
             images.append(img)
     finally:
         doc.close()

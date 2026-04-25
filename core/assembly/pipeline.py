@@ -288,8 +288,8 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
     elif role == "PART" and not pkg_has_content:
         # אריזה ריקה בלי סימון מפורש — כנראה המודל דילג
         msg = (
-            f"[INFO][MISSING_PACKING] סעיף PACKING לא חולץ לשרטוט PART — "
-            f"יתכן שהמודל דילג עליו (נפוץ בשרטוטי PRC עם סעיף אחרון 70.x/80.x/100.x)."
+            "[INFO][MISSING_PACKING] סעיף PACKING לא חולץ לשרטוט PART — "
+            "יתכן שהמודל דילג עליו (נפוץ בשרטוטי PRC עם סעיף אחרון 70.x/80.x/100.x)."
         )
         validation_warnings.append(msg)
         logger.info("[Assembly] ℹ️ %s", msg)
@@ -333,7 +333,8 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
     _merged = {**stage1, **stage2}
     # רוב הולידטורים מקבלים את ה-report המלא; validate_coating_classification
     # מקבלת רשימה בלבד, לכן נקראת בנפרד עם coating_processes ישיר.
-    from typing import Any, Callable
+    from collections.abc import Callable
+    from typing import Any
     _dict_validators = [
         validate_standards,
         validate_surface_prep_and_post_process,

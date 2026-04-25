@@ -233,7 +233,7 @@ def _validate_dwg_prefix(stage1: dict) -> str:
     if not prefixes:
         # אפשר להסיק לקוח גם מהקידומת של ה-P/N
         pn_upper = (stage1.get("part_number") or "").strip().upper()
-        for key, vals in _CUSTOMER_PREFIXES.items():
+        for vals in _CUSTOMER_PREFIXES.values():
             if any(pn_upper.startswith(p) for p in vals):
                 prefixes = vals
                 break

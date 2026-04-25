@@ -15,13 +15,13 @@ Prompts ייעודיים למצב 'מכלולים מרובים' (Assembly Mode).
 """
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 
 _PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts" / "assembly"
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load(name: str) -> str:
     path = _PROMPTS_DIR / name
     if not path.exists():
