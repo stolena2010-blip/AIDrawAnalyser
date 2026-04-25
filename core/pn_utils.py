@@ -457,6 +457,10 @@ _OCR_CONFUSION_PAIRS = {
     # L ↔ I (גופן בלוק — דומים במיוחד ב-CAPS)
     # דוגמה: EL0498-01-001 נקרא EI0498-01-001
     ("L", "I"), ("I", "L"),
+    # P ↔ 0 — נדיר אבל מתועד בסרקות עם DPI נמוך וקריאת BOM cells צפופים.
+    # דוגמה: BP70689A (תקין בכותרת השרטוט) נקרא "8070689" בתא BOM של BP70616A
+    # — שילוב של B↔8 + P↔0 + drop trailing A.
+    ("P", "0"), ("0", "P"),
 }
 
 
@@ -529,18 +533,50 @@ def insertion_deletion_distance(a: str, b: str) -> int:
     return 1 if diffs + remaining == 1 else 99
 
 
+def strip_letter_distance(a: str, b: str) -> int:
+    """
+    מטפל במקרה משולב: OCR confusion **+** drop של אות בודדת בקצה.
+
+    דוגמה אמיתית מתועדת:
+      ``BP70689A`` (8 תווים — הכותרת התקינה של השרטוט)
+      ``8070689`` (7 תווים — איך שזה נקרא בתא BOM צפוף ב-BP70616A)
+        - דרך:  strip של ``A`` בסוף + OCR confusion בשני התווים הראשונים
+                (``B↔8`` + ``P↔0``)
+        - תוצאה: distance=2
+
+    כללים:
+      • הפרש אורך בדיוק 1 (לא 0, לא 2+)
+      • התו האחרון של המחרוזת הארוכה חייב להיות אות (לא ספרה)
+      • אחרי הסרת האות הסופית — מריץ ``ocr_confusion_distance`` על מה שנשאר
+
+    מחזיר 99 אם אין match.
+    """
+    if not a or not b:
+        return 99
+    au, bu = a.upper(), b.upper()
+    if abs(len(au) - len(bu)) != 1:
+        return 99
+    longer, shorter = (au, bu) if len(au) > len(bu) else (bu, au)
+    if not longer[-1].isalpha():
+        # רק drop של אות סופית (לא ספרה — ספרה ב-PN לרוב משמעותית)
+        return 99
+    return ocr_confusion_distance(longer[:-1], shorter)
+
+
 def combined_pn_distance(a: str, b: str) -> int:
     """
-    המרחק הקטן מבין שלוש תבניות שגיאת OCR נפוצות:
-    1. החלפת תווים דומים (B↔8, O↔0, I↔1, S↔5, Z↔2, G↔6).
+    המרחק הקטן מבין ארבע תבניות שגיאת OCR נפוצות:
+    1. החלפת תווים דומים (B↔8, O↔0, P↔0, I↔1, S↔5, Z↔2, G↔6).
     2. החלפת סדר בין שני תווים סמוכים (BBJ1 ↔ BB1J).
     3. ספרה/אות בודדת שנעלמה או התווספה (BP7053A ↔ BP70534A).
+    4. OCR confusion **+** drop של אות סופית (BP70689A ↔ 8070689).
     ערך גבוה אם אף תבנית לא מתאימה (הבדל אמיתי, לא שגיאת קריאה).
     """
     return min(
         ocr_confusion_distance(a, b),
         transposition_distance(a, b),
         insertion_deletion_distance(a, b),
+        strip_letter_distance(a, b),
     )
 
 
@@ -664,25 +700,93 @@ def collect_bom_part_numbers(drawings: list[dict]) -> set[str]:
     return pns
 
 
+def _alpha_count(s: str) -> int:
+    """כמה אותיות (לא ספרות) במחרוזת — heuristic ל'איזה PN יותר structured'."""
+    return sum(1 for c in s or "" if c.isalpha())
+
+
+def _iter_bom_items_with_parent(drawings: list[dict]):
+    """yield (bom_pn_upper, parent_drawing_dict, item_dict) לכל פריט BOM
+    שיש לו part_number תקין."""
+    for d in drawings or []:
+        if not isinstance(d, dict):
+            continue
+        for item in d.get("bom_items") or []:
+            if not isinstance(item, dict):
+                continue
+            pn = (item.get("part_number") or "").strip()
+            if pn:
+                yield pn.upper(), d, item
+
+
 def cross_reference_part_numbers(drawings: list[dict]) -> list[str]:
     """
-    מצליב P/N של כל שרטוט מול ה-BOM של כל שאר השרטוטים. אם P/N של שרטוט
-    לא מופיע בשום BOM אבל קיים מועמד קרוב (OCR-confusion או החלפת סמוכים,
-    מרחק ≤ 2) — מתקן את השרטוט.
+    מצליב P/N של שרטוטים שהועלו מול ה-BOM של שאר השרטוטים. שני כיוונים:
+
+    **כיוון א' — תיקון BOM מהשרטוט:**
+    אם פריט BOM הוא **ספרות בלבד** (אין בו אותיות), אבל קיים שרטוט שהועלה
+    שה-PN שלו דומה ויש לו אותיות → מתקן את ה-BOM. הסיבה: כותרת שרטוט עם
+    prefix אותיות (``BP70689A``) תקינה סטטיסטית יותר מ-PN של ספרות בלבד
+    (``8070689``) שנראה כתוצאה ברורה של OCR שאיבד את האותיות. דוגמה
+    מתועדת: ``BP70689A`` שנקרא ``8070689`` ב-BOM של ``BP70616A``.
+
+    **כיוון ב' — תיקון שרטוט מ-BOM (legacy, רץ אחרי כיוון א'):**
+    אם PN של שרטוט לא מופיע בשום BOM (גם אחרי כיוון א'), ויש BOM PN דומה
+    (מרחק ≤2) → מתקן את השרטוט. מטפל במקרה ההפוך — שגיאת OCR בכותרת השרטוט
+    כשה-BOM של שרטוט אחר שמר את הצורה המלאה (``BNB0760B`` ↔ ``BN80760B``).
 
     מחזיר רשימת הודעות תיקון (לצורכי לוג / אזהרות).
     """
-    bom_pns = collect_bom_part_numbers(drawings)
-    if not bom_pns:
-        return []
     corrections: list[str] = []
+
+    # ─── כיוון א' — תיקון BOM מהשרטוט ───
+    # נתפס רק במקרה החד-משמעי: BOM PN ספרות-בלבד מול drawing PN עם אותיות.
+    # זה הסימן הברור ביותר ל-OCR שחתך את ה-prefix של אותיות.
+    drawing_pns_set = {
+        (d.get("part_number") or "").strip().upper()
+        for d in drawings or []
+        if isinstance(d, dict) and (d.get("part_number") or "").strip()
+    }
+    if drawing_pns_set:
+        for bom_pn, parent_d, item in _iter_bom_items_with_parent(drawings):
+            if bom_pn in drawing_pns_set:
+                continue
+            # סינון: רק BOM PN ספרות-בלבד נחשד ל-OCR שאכל אותיות
+            if _alpha_count(bom_pn) > 0:
+                continue
+            # מצא שרטוט הכי דומה שיש לו אותיות (ולכן יציב יותר)
+            best = None
+            best_dist = 99
+            for dpn in drawing_pns_set:
+                if _alpha_count(dpn) == 0:
+                    continue
+                dist = combined_pn_distance(bom_pn, dpn)
+                if dist < best_dist:
+                    best_dist = dist
+                    best = dpn
+            if best and 1 <= best_dist <= 2:
+                old_bom_pn = item.get("part_number", "")
+                item["part_number"] = best
+                parent_id = (parent_d.get("part_number") or
+                             parent_d.get("source_filename") or "?")
+                msg = (
+                    f"🔧 BOM auto-corrected in {parent_id}: "
+                    f"{old_bom_pn} → {best} (distance={best_dist}, "
+                    f"BOM PN was digits-only — likely OCR dropped letter prefix)"
+                )
+                logger.info(msg)
+                corrections.append(msg)
+
+    # ─── כיוון ב' — תיקון שרטוט מ-BOM (legacy) ───
+    bom_pns = collect_bom_part_numbers(drawings)  # re-collect after Phase 1
+    if not bom_pns:
+        return corrections
     for d in drawings or []:
         if not isinstance(d, dict):
             continue
         pn = (d.get("part_number") or "").strip()
         if not pn or pn.upper() in bom_pns:
             continue
-        # לא כל שרטוט חייב להופיע ב-BOM (שורש למשל). נתקן רק אם קיים מועמד קרוב.
         best = None
         best_dist = 99
         for bpn in bom_pns:

@@ -27,6 +27,7 @@ from core.pn_utils import (
     reconcile_part_number,
     reconcile_revision,
     salvage_revision,
+    strip_letter_distance,
     transposition_distance,
 )
 
@@ -725,3 +726,141 @@ class TestCrossReferencePartNumbers:
     def test_empty_bom_no_corrections(self):
         drawings = [{"part_number": "BNB0760B"}]
         assert cross_reference_part_numbers(drawings) == []
+
+
+# ═════════════════════════════════════════════════════════════════════
+# strip_letter_distance — matcher חדש ל-OCR confusion + drop trailing letter
+# ═════════════════════════════════════════════════════════════════════
+class TestStripLetterDistance:
+    """ה-matcher הזה מטפל במקרים שבהם OCR גם איבד אות סופית **וגם** עשה
+    החלפת תווים דומים. הדוגמה המתועדת: BP70689A ↔ 8070689 (B↔8 + P↔0 + drop A)."""
+
+    def test_real_case_bp70689a_vs_8070689(self):
+        """המקרה האמיתי שדווח — RAIL BEAM FOR WHEELS."""
+        # B↔8 + P↔0 + drop A → 2 הפרשים
+        assert strip_letter_distance("BP70689A", "8070689") == 2
+        # סימטרי
+        assert strip_letter_distance("8070689", "BP70689A") == 2
+
+    def test_simple_trailing_letter_drop(self):
+        """איבוד A בלבד, ללא OCR confusion."""
+        assert strip_letter_distance("BP70689A", "BP70689") == 0
+        assert strip_letter_distance("BP70689", "BP70689A") == 0
+
+    def test_trailing_letter_with_one_ocr_diff(self):
+        assert strip_letter_distance("BP70689A", "BP7O689") == 1  # O↔0
+
+    def test_returns_99_when_lengths_differ_by_more_than_1(self):
+        assert strip_letter_distance("BP70689A", "070689") == 99
+
+    def test_returns_99_when_no_trailing_letter(self):
+        """ספרה בסוף — לא drop של אות, לא רלוונטי."""
+        assert strip_letter_distance("BP706891", "BP70689") == 99
+
+    def test_returns_99_when_more_than_2_diffs(self):
+        # אם אחרי ה-strip יש 3+ הפרשים — לא match
+        assert strip_letter_distance("ABCDA", "8070") == 99
+
+    def test_returns_99_for_empty_strings(self):
+        assert strip_letter_distance("", "BP70689A") == 99
+        assert strip_letter_distance("BP70689A", "") == 99
+
+
+# ═════════════════════════════════════════════════════════════════════
+# combined_pn_distance — בדיקה שה-matcher החדש משולב
+# ═════════════════════════════════════════════════════════════════════
+class TestCombinedPnDistanceWithStripLetter:
+    def test_includes_strip_letter_matcher(self):
+        """combined_pn_distance צריך להחזיר 2 ל-BP70689A↔8070689 (לא 99)."""
+        assert combined_pn_distance("BP70689A", "8070689") == 2
+
+    def test_p_to_0_in_ocr_confusion(self):
+        """P↔0 הוסף לטבלת ה-OCR confusion."""
+        assert ocr_confusion_distance("P", "0") == 1
+        assert ocr_confusion_distance("0", "P") == 1
+
+
+# ═════════════════════════════════════════════════════════════════════
+# cross_reference Phase 1 — תיקון BOM מהשרטוט (BP70689A case)
+# ═════════════════════════════════════════════════════════════════════
+class TestCrossReferenceBomCorrection:
+    def test_corrects_digits_only_bom_to_drawing_pn(self):
+        """המקרה האמיתי: BP70689A הועלה כשרטוט. BP70616A יש לו BOM עם 8070689."""
+        drawings = [
+            {
+                "part_number": "BP70689A",  # הכותרת התקינה
+                "title": "RAIL BEAM FOR WHEELS",
+            },
+            {
+                "part_number": "BP70616A",
+                "bom_items": [
+                    {"part_number": "8070689", "description": "RAIL BEAM FOR WHEELS",
+                     "qty": "8"},
+                    {"part_number": "BP70534A", "description": "QLTY CART", "qty": "1"},
+                ],
+            },
+        ]
+        corrections = cross_reference_part_numbers(drawings)
+        # ה-BOM item צריך לקבל BP70689A במקום 8070689
+        assert drawings[1]["bom_items"][0]["part_number"] == "BP70689A"
+        # ה-drawing PN של BP70689A חייב להישאר ללא שינוי!
+        assert drawings[0]["part_number"] == "BP70689A"
+        # התיקון תועד
+        assert any("BP70689A" in m and "8070689" in m for m in corrections)
+
+    def test_does_not_corrupt_drawing_pn_when_bom_is_wrong(self):
+        """באג קודם: ה-cross-ref ישן היה מחליף BP70689A (תקין) ב-8070689 (שגוי).
+        הבדיקה הזו מוודאת שזה לא קורה יותר."""
+        drawings = [
+            {"part_number": "BP70689A"},
+            {
+                "part_number": "ASM",
+                "bom_items": [{"part_number": "8070689"}],
+            },
+        ]
+        cross_reference_part_numbers(drawings)
+        # BP70689A חייב להישאר — לא להפוך ל-8070689
+        assert drawings[0]["part_number"] == "BP70689A"
+        # להפך — ה-BOM צריך להתעדכן
+        assert drawings[1]["bom_items"][0]["part_number"] == "BP70689A"
+
+    def test_skips_when_bom_pn_has_letters(self):
+        """Phase 1 רץ רק על BOM PN ספרות-בלבד. אם יש לו אותיות — לא נוגעים."""
+        drawings = [
+            {"part_number": "BNB0760B"},  # סטיית OCR ידועה
+            {
+                "part_number": "ASM",
+                "bom_items": [{"part_number": "BN80760B"}],  # יש אותיות!
+            },
+        ]
+        cross_reference_part_numbers(drawings)
+        # Phase 1 מדלג כי BN80760B יש לו אותיות.
+        # Phase 2 (legacy) מתקן את ה-drawing במקום.
+        assert drawings[0]["part_number"] == "BN80760B"  # legacy behavior
+        assert drawings[1]["bom_items"][0]["part_number"] == "BN80760B"  # נשאר
+
+    def test_skips_when_no_drawing_with_letters(self):
+        """אם אין שרטוט עם אותיות — אין מועמד שעדיף על ה-BOM, לא נוגעים."""
+        drawings = [
+            {"part_number": "12345"},  # ספרות בלבד
+            {
+                "part_number": "67890",
+                "bom_items": [{"part_number": "8070689"}],  # ספרות
+            },
+        ]
+        cross_reference_part_numbers(drawings)
+        # שום דבר לא משתנה
+        assert drawings[1]["bom_items"][0]["part_number"] == "8070689"
+
+    def test_skips_when_distance_too_large(self):
+        """אם ההבדל גדול מדי — לא תיקון אוטומטי."""
+        drawings = [
+            {"part_number": "ABCXYZ"},
+            {
+                "part_number": "ASM",
+                "bom_items": [{"part_number": "1234567"}],  # ספרות, אבל רחוק
+            },
+        ]
+        cross_reference_part_numbers(drawings)
+        # ABCXYZ ↔ 1234567 — distance גדול. לא מתאים.
+        assert drawings[1]["bom_items"][0]["part_number"] == "1234567"
