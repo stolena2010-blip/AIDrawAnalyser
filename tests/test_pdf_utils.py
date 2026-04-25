@@ -92,15 +92,45 @@ class TestValidatePdfSource:
 # Integration: pdf_to_images עם PDF אמיתי קטן
 # ─────────────────────────────────────────────────────────────────
 def _create_minimal_pdf(pages: int = 1) -> bytes:
-    """יוצר PDF מינימלי בזיכרון עם N עמודים — דרך PyMuPDF (קיים בפרויקט)."""
-    import fitz
-    doc = fitz.open()
-    for i in range(pages):
-        page = doc.new_page(width=612, height=792)  # Letter
-        page.insert_text((100, 100), f"Test page {i + 1}")
-    data = doc.tobytes()
-    doc.close()
-    return data
+    """יוצר PDF מינימלי תקני בזיכרון, בלי שום תלות חיצונית.
+
+    בונה ידנית את מבנה ה-PDF (catalog / pages / page objects / xref / trailer).
+    PyMuPDF (fitz) הוסר מהפרויקט במסגרת הסרת AGPL — לכן הבדיקות לא יכולות
+    להשתמש בו ליצירת fixtures. pypdfium2 לא תומך ביצירת PDF מאפס.
+    הפתרון: builder ידני של ~30 שורות, מספיק עבור pypdfium2 לקרוא ולחלק לעמודים.
+    """
+    # אובייקטים: 1=Catalog, 2=Pages, 3..N=Page objects
+    objects: list[bytes] = []
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    kids = " ".join(f"{3+i} 0 R" for i in range(pages))
+    objects.append(
+        f"<< /Type /Pages /Kids [{kids}] /Count {pages} >>".encode()
+    )
+    for _ in range(pages):
+        objects.append(
+            b"<< /Type /Page /Parent 2 0 R "
+            b"/MediaBox [0 0 612 792] /Resources << >> >>"
+        )
+
+    # PDF binary header (the binary marker line lets parsers detect PDF as binary)
+    out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets: list[int] = []
+    for i, obj_body in enumerate(objects, 1):
+        offsets.append(len(out))
+        out.extend(f"{i} 0 obj\n".encode())
+        out.extend(obj_body)
+        out.extend(b"\nendobj\n")
+
+    xref_pos = len(out)
+    out.extend(f"xref\n0 {len(objects) + 1}\n".encode())
+    out.extend(b"0000000000 65535 f \n")
+    for off in offsets:
+        out.extend(f"{off:010d} 00000 n \n".encode())
+    out.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n".encode()
+    )
+    out.extend(f"startxref\n{xref_pos}\n%%EOF\n".encode())
+    return bytes(out)
 
 
 class TestPdfToImagesIntegration:
