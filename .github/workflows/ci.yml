@@ -39,7 +39,7 @@ jobs:
         run: python tests/test_exceptions.py
 
       - name: Run pytest suite
-        run: pytest tests/ -v
+        run: pytest tests/ -v --tb=long --color=no
 
       - name: Verify module imports
         run: |
