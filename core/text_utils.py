@@ -9,6 +9,12 @@ from __future__ import annotations
 
 import re
 
+from core._customer_data import (
+    CAGE_TO_CUSTOMER,
+    CUSTOMER_ALIASES as _CUSTOMER_ALIASES,
+    CUSTOMER_TO_DEFAULT_CAGE,
+)
+
 
 def deduplicate_repeated_phrase(text: str, min_repeat: int = 3) -> str:
     """
@@ -119,6 +125,22 @@ _KNOWN_PHRASE_NORMALIZATIONS: list[tuple[re.Pattern, str, str]] = [
      r"\1", "TO-SM-111→SM-111"),
     (re.compile(r"\bTO[-\s]+(RAFDOCS)", re.IGNORECASE),
      r"\1", "TO-RAFDOCS→RAFDOCS"),
+
+    # PS<letters><digits> — OCR שקרא 0 כ-O/Q/D באמצע מספר PS
+    # דוגמה: "PSSOO100" → "PS500100" (S→5, OO→00) — מצב ייחודי ל-RAFAEL PS specs
+    # התבנית: "PS" + "S" (שאמור להיות 5) + "OO"/"QQ"/"DD" (אמורות להיות ספרות) + ספרות
+    (re.compile(r"\bPSS([OQD]{2,3})(\d+)\b"),
+     r"PS5\1\2", "PSS_prefix→PS5 + letters_to_digits_below"),
+    # ואז עיבוד נוסף — OO/QQ/DD בתוך רצף של ספרות PS → 00
+    (re.compile(r"(PS\d{1,3})OO(\d*)"),
+     r"\g<1>00\2", "PS_OO→PS_00"),
+    (re.compile(r"(PS\d{1,3})QQ(\d*)"),
+     r"\g<1>00\2", "PS_QQ→PS_00"),
+    (re.compile(r"(PS\d{1,3})DD(\d*)"),
+     r"\g<1>00\2", "PS_DD→PS_00"),
+    # "PS5OO100" → "PS500100" (one OO pair)
+    (re.compile(r"(PS\d{1,3})O(\d+)"),
+     r"\g<1>0\2", "PS_O_digit→PS_0_digit"),
 ]
 
 
@@ -172,6 +194,121 @@ def normalize_known_phrases_in_place(result: dict) -> list[str]:
             seen.add(c)
             unique.append(c)
     return unique
+
+
+# ───────────────────────────────────────────────────────────────
+# CAGE Code → Customer mapping
+# ───────────────────────────────────────────────────────────────
+# המפות נטענות מ-data/customer_mappings.json ע"י core._customer_data.
+# הוספת CAGE / לקוח חדש = עריכת ה-JSON, ללא שינוי קוד.
+# https://cage.dla.mil — מקור רשמי לקודי CAGE.
+
+# CAGE code pattern: 5-6 alphanumeric chars, no special chars
+# רגיל: "0772A", "1410A", "1GYX", "1931"
+# שגוי: "1!1" (OCR error), "XX-YY" (ID, not CAGE)
+_CAGE_CODE_RE = re.compile(r"^[A-Z0-9]{3,6}$", re.IGNORECASE)
+
+
+def clean_cage_code(cage: str) -> str:
+    """
+    מנקה קוד CAGE: מסיר רווחים, בודק תקפות.
+    CAGE תקין = 3-6 תווים אלפאנומריים בלבד.
+    אם יש תווים מיוחדים (! @ # וכו') — החזר "" (זיהוי שגוי של OCR).
+    """
+    if not cage:
+        return ""
+    c = (cage or "").strip().upper()
+    if not _CAGE_CODE_RE.match(c):
+        return ""
+    return c
+
+
+def infer_cage_from_customer(stage1: dict) -> bool:
+    """
+    Reverse lookup: אם `customer` מוכר (במפה CUSTOMER_TO_DEFAULT_CAGE)
+    אבל `cage_code` ריק — מלא אוטומטית עם ה-CAGE הדיפולטי.
+
+    ⚠️ זה הערכה — לקוח גדול יכול להשתמש בכמה CAGE codes. מעדיף את הנפוץ.
+    מחזיר True אם בוצעה השלמה.
+    """
+    if not isinstance(stage1, dict):
+        return False
+    if (stage1.get("cage_code") or "").strip():
+        return False
+    customer = (stage1.get("customer") or "").strip()
+    if customer in CUSTOMER_TO_DEFAULT_CAGE:
+        stage1["cage_code"] = CUSTOMER_TO_DEFAULT_CAGE[customer]
+        return True
+    return False
+
+
+def infer_customer_from_cage(stage1: dict) -> bool:
+    """
+    אם ``customer`` ריק אבל יש ``cage_code`` במפה — מלא אוטומטית.
+    גם מנקה CAGE לא-תקין (תווים מיוחדים) ל-"".
+    מחזיר True אם בוצעה השלמה.
+    """
+    if not isinstance(stage1, dict):
+        return False
+    raw_cage = stage1.get("cage_code") or ""
+    cleaned = clean_cage_code(raw_cage)
+    if cleaned != raw_cage.strip().upper():
+        # CAGE לא תקין — נקה במקום
+        stage1["cage_code"] = cleaned
+    if (stage1.get("customer") or "").strip():
+        return False
+    cage = cleaned
+    if cage in CAGE_TO_CUSTOMER:
+        stage1["customer"] = CAGE_TO_CUSTOMER[cage]
+        return True
+    return False
+
+
+# ───────────────────────────────────────────────────────────────
+# Customer name normalization — איחוד שמות זהים שנכתבו שונה
+# ───────────────────────────────────────────────────────────────
+# המפה _CUSTOMER_ALIASES נטענת מ-data/customer_mappings.json (ראה import למעלה).
+# מוחלת אחרי נרמול: UPPER + רווח יחיד + ללא `- `, `. ` חוזרים.
+
+
+def _normalize_key(name: str) -> str:
+    """נרמול לצורך חיפוש במפה: UPPER, רווח יחיד, ללא פיסוק."""
+    s = (name or "").upper()
+    s = re.sub(r"[\.,_/]+", " ", s)     # נקודות/פסיקים/קו תחתון → רווח
+    s = re.sub(r"[-]+", " ", s)          # מקפים → רווח
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def normalize_customer_name(name: str) -> str:
+    """
+    ממפה שם לקוח לצורתו הקנונית.
+    אם לא נמצא במפה — מחזיר את המקור.
+    """
+    if not name:
+        return ""
+    key = _normalize_key(name)
+    if key in _CUSTOMER_ALIASES:
+        return _CUSTOMER_ALIASES[key]
+    # ניסיון התאמה חלקית — אם השם ארוך ומתחיל באליאס קצר יותר
+    for alias_key, canonical in _CUSTOMER_ALIASES.items():
+        if len(alias_key) >= 6 and key.startswith(alias_key + " "):
+            return canonical
+    return name.strip()
+
+
+def normalize_customer_in_place(stage1: dict) -> bool:
+    """
+    מנרמל את ``stage1['customer']`` למקום. מחזיר True אם השם השתנה.
+    """
+    if not isinstance(stage1, dict):
+        return False
+    original = stage1.get("customer") or ""
+    canonical = normalize_customer_name(original)
+    if canonical != original:
+        stage1["customer"] = canonical
+        return True
+    return False
 
 
 def clean_bom_items_in_place(bom_items: list) -> int:

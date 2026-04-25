@@ -22,7 +22,6 @@ from typing import Callable, TypeVar
 
 from core.azure_client import is_reasoning_model, get_fallback_client_and_deployment
 from core.exceptions import (
-    AIError,
     AllModelsFailedError,
     EmptyResponseError,
     InvalidResponseError,
@@ -194,11 +193,11 @@ def safe_call(call_fn, client, deployment, *extra_args, stage: str | None = None
     except Exception as primary_exc:
         fb_client, fb_deployment, fb_model = get_fallback_client_and_deployment()
         if fb_client is None:
-            err = ModelCallError(
+            primary_err: Exception = ModelCallError(
                 f"Primary model call failed: {primary_exc}",
                 context={"original_error": str(primary_exc)},
             )
-            raise _wrap(err) from primary_exc
+            raise _wrap(primary_err) from primary_exc
         logger.warning(
             "⚠️ קריאה למודל הראשי נכשלה (%s) — עובר ל-fallback: %s",
             primary_exc, fb_model,
@@ -206,7 +205,7 @@ def safe_call(call_fn, client, deployment, *extra_args, stage: str | None = None
         try:
             return call_fn(fb_client, fb_deployment, *extra_args, model=fb_model)
         except Exception as fb_exc:
-            err = AllModelsFailedError(
+            both_err: Exception = AllModelsFailedError(
                 f"Primary: {primary_exc} | Fallback: {fb_exc}",
                 context={
                     "primary_error": str(primary_exc),
@@ -214,4 +213,4 @@ def safe_call(call_fn, client, deployment, *extra_args, stage: str | None = None
                     "fallback_model": fb_model,
                 },
             )
-            raise _wrap(err) from fb_exc
+            raise _wrap(both_err) from fb_exc

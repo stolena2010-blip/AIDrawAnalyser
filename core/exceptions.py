@@ -207,7 +207,6 @@ def format_error_for_ui(exc: Exception, *, include_technical: bool = False) -> s
         מחרוזת Markdown מעוצבת לתצוגה ב-st.error / st.warning
     """
     if isinstance(exc, DrawingLightError):
-        severity_icon = _SEVERITY_EMOJI.get(exc.severity, "❌")
         lines = [
             f"{exc.emoji} **{exc.user_message}**",
             "",

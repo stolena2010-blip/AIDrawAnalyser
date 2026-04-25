@@ -105,10 +105,29 @@
     אם אין סימון → "".
 
 6.f cage_code — קוד CAGE CODE של הלקוח (Commercial And Government Entity):
-    מחרוזת קצרה של 5-6 תווים אלפאנומריים (למשל "0772A", "0439A", "E0B7R6").
-    מקור: שדה CAGE CODE ב-Title Block (נפוץ בשרטוטי Elbit Systems, BAE, Boeing).
-    ⚠️ CAGE CODE ≠ part_number! אל תבלבל.
-    אם אין → "".
+    מחרוזת קצרה של 5-6 תווים אלפאנומריים (ספרות+אות/ות), למשל:
+      • Elbit Elop:     "0772A"
+      • Elbit Systems:  "1410A", "1GYX"
+      • IAI Elta:       "1933A", "1910A", "1937A"
+      • RAFAEL:         "1931", "36035", "3971A"
+      • ELTA Systems:   "1933A"
+      • BAE:            "ZE6G3"
+
+    🔴 **מיקום — חפש בזהירות ב-Title Block**:
+    CAGE CODE נמצא כמעט **תמיד** בתא ייעודי בפינה השמאלית-תחתונה של ה-title block,
+    מעל/ליד התאים של DESIGNED / DRAWN / CHECKED / APPROVED.
+    לרוב עם label מפורש: "CAGE CODE" או "CAGE NO." או "CAGE".
+    לפעמים נקרא גם "FSCM" (ישן) או "NSCM" (NATO Supplier Code).
+
+    ⚠️ **חובה לבדוק ביסודיות**:
+    • RAFAEL — לרוב יש CAGE "1931" ליד הלוגו
+    • IAI ELTA — CAGE "1933A" חובה, ליד DESIGNED
+    • Elbit — CAGE "0772A"/"1410A" מעל signature block
+    • אם בלוגו או title block כתוב RAFAEL/IAI/ELBIT — **חפש CAGE**; סיכוי גבוה שיש.
+
+    ⚠️ CAGE CODE **אינו** part_number ואינו catalog_number.
+    ⚠️ קבוצות של 5 ספרות בלבד כמו "36035" לרוב הן CAGE (של RAFAEL).
+    אם בדקת ואין שדה מסומן → "".
 
 6.g material_formerly — תקני חומר מבוטלים (Federal Specs ישנים בתוך סוגריים):
     דוגמה מ-Elbit:
@@ -130,12 +149,27 @@
     אם אין → {"qty": "", "unit": ""}.
 
 6.k revisions_history — היסטוריית גרסאות מלאה מטבלת REVISIONS (מערך):
-    חלץ **כל** שורה מהטבלה לפי סדר כרונולוגי (הישנה ביותר ראשונה).
-    מבנה לכל פריט:
-      {"rev": "<אות/מספר>", "date": "<DD/MM/YYYY>",
-       "description": "<תיאור השינוי>", "approved_by": "<שם/חתימה>"}
-    ה-``revision`` (שדה 2) הוא תמיד הפריט ה**אחרון** ברשימה.
-    אם אין טבלת REVISIONS → [].
+    🔴 **חובה לחלץ את כל השורות** — לא רק את האחרונה!
+    טבלת REVISIONS מזוהה עם כותרות עמודות כמו: `REV`, `ECN/ECR/ECO`, `DESCRIPTION`,
+    `DATE`, `APPROVED BY`, `ID`, `SIGNATURE`. במיקום טיפוסי: **ראש השרטוט מימין/שמאל**.
+
+    לכל שורה בטבלה צור פריט:
+      {"rev": "<אות/מספר — A/B/C או 01/02/03>",
+       "date": "<DD/MM/YYYY או כפי שכתוב>",
+       "description": "<תיאור השינוי — 'NEW DRAWING', 'MATERIAL CHANGED', ECR-XXXXXX>",
+       "approved_by": "<שם או חתימה>"}
+
+    ⚠️ דוגמה:
+      אם בטבלה יש שורות: A (22/10/14 L.B.), B (24/01/18 L.B.), C (26/03/25 M.L.) —
+      החזר **3 פריטים**, לא רק את C.
+
+    ⚠️ סדר: מהישנה ביותר לחדשה ביותר (למעלה → למטה בטבלה).
+    ה-``revision`` (שדה 2) הוא תמיד הפריט ה**אחרון** (הגרסה הנוכחית).
+
+    ⚠️ אם יש חסר בטקסט (למשל חתימה לא קריאה) — מלא מה שיש, השאר ריק את השדות
+    שלא ניתן לחלץ. אל תדלג על השורה.
+
+    אם אין טבלת REVISIONS בכלל → [].
 
 6.j environment_requirements — דרישות סביבת ייצור (מערך מחרוזות):
     חלץ אם השרטוט מציין סביבה נשלטת. דוגמאות:
@@ -170,6 +204,18 @@
    אם אין טבלה → [].
    ⚠️ אם כל ה-items מצביעים ל-P/N של השרטוט עצמו (self-reference) — החזר []
      (רשימה ריקה) + קבע `assembly_role = "PART"`.
+
+   📄 **שרטוטים רב-עמודיים (SHEET 1 OF 2 / OF 3 / ...)**:
+   **חובה** לסרוק את **כל** העמודים — ה-BOM / Parts List לעיתים קרובות בגיליון
+   **האחרון**, לא בראשון. אסור להסתפק בגיליון הראשון כשרואים "SHT 1 OF N"
+   או "PAGE 1/N" בכותרת.
+   • BIRD AEROSYSTEMS: Parts List בדרך כלל באמצע (sheet 1), עם "ITEM, PART NO.,
+     DESCRIPTION, MATERIAL, QTY" בכותרות.
+   • Elbit: לעיתים BOM בגיליון 2 עם "ITEM, FIND NO, PART NUMBER, DESCRIPTION".
+   • IAI: "PARTS LIST" או "טבלת חלקים" באנגלית/עברית.
+   • ALEXANDER SCHNEIDER: "BOM" מפורש עם שורות של item_no 1/2/3.
+   ⚠️ אם ראית הפניה כמו "Install inserts ITEM 2 after coating" או "SEE ITEM 5"
+     בטקסט השרטוט — זה **רמז חזק** שיש BOM; חפש את הטבלה בכל העמודים.
 
 🔵 RAFAEL — אם רואים את הלוגו / השם "RAFAEL":
    • CAT NO. ≠ part_number.

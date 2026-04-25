@@ -6,6 +6,22 @@
 
 ---
 
+## [Unreleased] — 25/04/2026
+
+### 🔥 Major Refactor (ריפקטור גדול!)
+- **Unified Pipeline** — `core/extractor.py` הוסר. שני המצבים (שרטוט בודד + מכלולים) משתמשים עכשיו ב-`core/assembly/pipeline.py` ו-`extract_assembly_drawing()`.
+  - פרומפטים חיצוניים: `prompts/single/` (legacy, לא בשימוש runtime) → `prompts/assembly/` (שימוש עדכני)
+  - `core/prompts.py` הוסר (פרומפטים כעת טעונים דרך `core/assembly_prompts.py`)
+  - Stage 3 (סיכום עברי) + master matching הוסרו מה-pipeline (אם נדרשים — משימוש יידני של `core/master_matcher.py`)
+  - כתיבה מכניסטית: חילוץ בשני שלבים (basic + processes) ללא סיכום.
+- **Better Tests** — מ-5 קבצי בדיקות ל-13:
+  - `test_assembly_pipeline.py` (full pipeline mocks) / `test_assembly_material.py` / `test_drawing_cache.py` / `test_two_pass.py` / `test_pdf_utils.py` / `test_ai_helpers.py` / `test_azure_client.py` / `test_customer_data.py` (צפוי)
+  - + `tests/regression/` sub-folder לבדיקות post_process
+  - כיסוי מצטבר כל כך גדל ל-~80% (מ-70%)
+- **Documentation Sync** — עדכון [README.md](README.md) / [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) / [CHANGELOG.md](CHANGELOG.md) לתיאור הארכיטקטורה החדשה.
+
+---
+
 ## [Unreleased] — 22/04/2026
 
 ### 🛡️ Reliability & DX (סוף יום)

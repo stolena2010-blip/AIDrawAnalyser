@@ -304,6 +304,18 @@ AND HYDROGEN RELIEF AFTER PLATING
    ❌ אסור: "MIL-STD-145-A-2009" / "MIL-APPD VOL.2" אם לא כתובים מפורשות.
    ✅ אם אתה לא **100% בטוח** שהתקן מופיע בשרטוט — **אל תכלול** אותו.
 
+   ⛔ **אסור ערכים גנריים ב-standards — הם אינם תקנים**:
+   • "ISO STANDARDS" / "ISO STANDARD" / "MIL STANDARDS" / "APPLICABLE STANDARDS"
+     → אלה משפטי general_instructions ("INTERPRET PER ISO STANDARDS"), לא תקנים.
+     חלץ אותם ל-general_instructions אם רלוונטי, **לא** ל-standards.
+   • "RoHS" / "RoHS COMPLIANT" → דגל תאימות, לא תקן. הכנס ב-`rohs: true` של
+     תהליך ציפוי/צביעה הרלוונטי, לא ל-standards.
+   • "WPS" לבד (Welding Procedure Specification) → לא תקן — זו הפניה כללית.
+     רק WPS-<מספר> ספציפי הוא תקן.
+   • שיטות NDT/ריתוך לבד (**VT, PT, MT, UT, RT, GTAW, GMAW, TIG, MIG**)
+     — אלו **שיטות ביצוע**, לא תקנים. הכנס אותן ל-welding_processes/ndt_processes.
+     רק צמדים כמו "ASTM E1417" או "AWS D1.1" הם התקנים שמנחים את השיטה.
+
    📚 **מקורות לגיטימיים לתקנים** (חלץ **אך ורק** מכאן):
       1. Title Block (SURFACE FINISH, GENERAL TOLERANCES).
       2. NOTES (כולל NOTES ממוספר היררכי: 3.1, 4.1).

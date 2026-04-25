@@ -1,0 +1,126 @@
+{
+  "_description": "מיפויי לקוח/CAGE/קידומת P-N שראינו בנתונים אמיתיים. עריכה ידנית מותרת — אין צורך לערוך קוד. אחרי עדכון יש לבמפ את CACHE_VERSION ב-core/drawing_cache.py כדי לאלץ ניתוח מחודש.",
+  "_schema": {
+    "cage_to_customer": "{CAGE קוד 3-6 תווים אלפאנומריים} → {שם קנוני של הלקוח}",
+    "customer_to_default_cage": "{שם קנוני} → {CAGE הנפוץ ביותר}. משמש ל-reverse lookup כש-customer ידוע אבל CAGE ריק.",
+    "customer_aliases": "{שם UPPER ללא פיסוק} → {שם קנוני}. מנרמל ואריאציות נפוצות (ELOP, IAI וכו') לשם רשמי אחד.",
+    "pn_prefix_to_customer": "{קידומת P-N} → {שם הלקוח לבדיקת עקביות}. אם PN מתחיל בקידומת ידועה אבל customer שונה — אזהרה.",
+    "customer_internal_spec_patterns": "{שם הלקוח} → [רשימה של regex patterns]. תקנים שתואמים את ה-pattern של הלקוח לא מסומנים כהזיה."
+  },
+
+  "cage_to_customer": {
+    "0772A": "Elbit Systems Electro-Optics Elop Ltd.",
+    "1410A": "Elbit Systems Ltd.",
+    "1GYX":  "Elbit Systems Ltd.",
+    "3971A": "Elbit Systems",
+    "1933A": "Israel Aerospace Industries (IAI ELTA)",
+    "1910A": "Israel Aerospace Industries",
+    "1937A": "Israel Aerospace Industries",
+    "1931":  "RAFAEL Advanced Defense Systems Ltd.",
+    "1931A": "RAFAEL Advanced Defense Systems Ltd.",
+    "36035": "RAFAEL Advanced Defense Systems Ltd.",
+    "2198A": "KRETOS General Microwave"
+  },
+
+  "customer_to_default_cage": {
+    "RAFAEL Advanced Defense Systems Ltd.":     "1931",
+    "Israel Aerospace Industries":              "1910A",
+    "Israel Aerospace Industries (IAI ELTA)":   "1933A",
+    "Elbit Systems Ltd.":                       "1410A",
+    "Elbit Systems Electro-Optics Elop Ltd.":   "0772A",
+    "KRETOS General Microwave":                 "2198A"
+  },
+
+  "customer_aliases": {
+    "EL OR SYSTEMS LTD":  "EL-OR Systems Ltd.",
+    "EL OR SYSTEMS LT":   "EL-OR Systems Ltd.",
+    "EL OR SYSTEMS":      "EL-OR Systems Ltd.",
+    "ELOR SYSTEMS":       "EL-OR Systems Ltd.",
+
+    "ELBIT SYSTEMS ELECTRO OPTICS ELOP LTD": "Elbit Systems Electro-Optics Elop Ltd.",
+    "ELBIT SYSTEMS ELOP": "Elbit Systems Electro-Optics Elop Ltd.",
+    "ELOP":               "Elbit Systems Electro-Optics Elop Ltd.",
+    "ELBIT ELOP":         "Elbit Systems Electro-Optics Elop Ltd.",
+    "ELBIT SYSTEMS ELEC": "Elbit Systems Ltd.",
+    "ELBIT SYSTEMS":      "Elbit Systems Ltd.",
+
+    "RAFAEL":                            "RAFAEL Advanced Defense Systems Ltd.",
+    "RAFAEL ADVANCED DEFENSE SYSTEMS":   "RAFAEL Advanced Defense Systems Ltd.",
+
+    "ISRAEL AEROSPACE INDUSTRIES":       "Israel Aerospace Industries",
+    "IAI":                               "Israel Aerospace Industries",
+    "IAI ELTA":                          "Israel Aerospace Industries (IAI ELTA)",
+
+    "MECHANICO SHAFTECH ENGINEERING LTD": "Mechanico-Shaftech Engineering Ltd.",
+    "MECHANICO SHAFTECH":                 "Mechanico-Shaftech Engineering Ltd.",
+
+    "BIRD AEROSYSTEMS":  "BIRD Aerosystems Ltd.",
+    "BIRD AEROSPACE":    "BIRD Aerosystems Ltd.",
+
+    "RADA":                              "RADA Electronic Industries Ltd.",
+    "RADA ELECTRONIC INDUSTRIES":        "RADA Electronic Industries Ltd.",
+    "RADA ELECTRONIC INDUSTRIES LTD":    "RADA Electronic Industries Ltd.",
+
+    "ETTEM ENGINEERING SA LTD":          "ETTEM Engineering S.A. Ltd.",
+    "ETTEM ENGINEERING S A LTD":         "ETTEM Engineering S.A. Ltd.",
+    "ETTEM ENGINEERING":                 "ETTEM Engineering S.A. Ltd.",
+
+    "ZIVAV TECHNOLOGIES":                "ZiVaV Technologies",
+    "ZIVAV":                             "ZiVaV Technologies",
+
+    "AIRPART MANUFACTURING LTD":         "Airpart Manufacturing Ltd.",
+    "AIRPART MANUFACTURING":             "Airpart Manufacturing Ltd.",
+    "AIRPART":                           "Airpart Manufacturing Ltd."
+  },
+
+  "pn_prefix_to_customer": {
+    "BAS":  "BIRD Aerosystems Ltd.",
+    "BP":   "RAFAEL",
+    "BB":   "RAFAEL",
+    "BG":   "RAFAEL",
+    "BH":   "RAFAEL",
+    "BN":   "RAFAEL",
+    "BO":   "RAFAEL",
+    "BK":   "RAFAEL",
+    "BA":   "RAFAEL",
+    "RF":   "RAFAEL",
+    "PWRL": "RAFAEL",
+    "BBLE": "RAFAEL",
+    "HLTA": "RAFAEL",
+    "FTLS": "RAFAEL",
+    "FTL":  "RAFAEL",
+    "MMA":  "RAFAEL",
+    "M1R":  "RAFAEL",
+    "L":    "RAFAEL",
+    "CZ":   "RAFAEL",
+    "MEC":  "Mechanico-Shaftech Engineering Ltd."
+  },
+
+  "customer_internal_spec_patterns": {
+    "KRETOS General Microwave": [
+      "^I-\\d{5,7}"
+    ],
+    "Israel Aerospace Industries": [
+      "^5902[A-Z]\\d{3}",
+      "^5902NB00",
+      "^1092[A-Z]\\d{3}",
+      "^DOC\\d{7,}",
+      "^\\d{4}[A-Z]\\d{3}-\\d{3}"
+    ],
+    "ELTA": [
+      "^5902[A-Z]\\d{3}",
+      "^1092[A-Z]\\d{3}"
+    ],
+    "APPLIED MATERIALS": [
+      "^0023-\\d{5}",
+      "^0250-\\d{5}"
+    ],
+    "Laor Energy": [
+      "^LAOR ENERGY\\s+\\d",
+      "^W\\d{4}"
+    ],
+    "RAFAEL Advanced Defense Systems Ltd.": [
+      "^GEN[\\._\\s]?\\d"
+    ]
+  }
+}

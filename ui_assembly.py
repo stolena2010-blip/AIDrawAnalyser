@@ -7,6 +7,8 @@ UI של מצב 'מכלולים מרובים'.
 from __future__ import annotations
 
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +30,11 @@ from storage.pdf_report import (
 from core.exceptions import format_error_for_ui, get_streamlit_level
 
 logger = logging.getLogger(__name__)
+
+
+# מספר עובדים מקבילים לחילוץ שרטוטים. ערך גבוה מדי יחרוג מ-rate limit
+# של Azure OpenAI (4-8 בטוח לרוב ה-tier-ים). ניתן לכוונן עם משתנה סביבה.
+ASSEMBLY_PARALLELISM = max(1, int(os.environ.get("ASSEMBLY_PARALLELISM", "4")))
 
 
 def _show_error(exc: Exception, *, prefix: str = "") -> None:
@@ -463,8 +470,8 @@ def render_assembly_mode(output_dir: Path):
     """מצייר את כל מסך מצב המכלולים."""
     _init_state()
 
-    st.caption("🧩 **מצב מכלולים** — העלה מספר שרטוטים יחד · "
-               "נתח כל אחד בנפרד · קבל ניתוח קשרי אבא/בן בסוף")
+    st.caption("העלה מספר שרטוטים יחד · נתח כל אחד בנפרד · "
+               "קבל ניתוח קשרי אבא/בן בסוף")
 
     # ─── 1. העלאת קבצים ───
     st.markdown("### 1️⃣ העלה שרטוטים PDF (ואופציונלית תרשים מכלול PNG/JPG)")
@@ -490,19 +497,37 @@ def render_assembly_mode(output_dir: Path):
             st.session_state["asm_relationships"] = None
             st.rerun()
 
-    # ─── 2. ניתוח ───
+    # ─── 2. ניתוח (מקבילי — ASSEMBLY_PARALLELISM workers) ───
     if do_analyze and files:
-        progress = st.progress(0.0, text="מתחיל ניתוח...")
-        results: list[dict] = []
-        for i, f in enumerate(files, 1):
-            progress.progress(
-                (i - 1) / len(files),
-                text=f"🔄 מנתח {i}/{len(files)}: {f.name}",
-            )
-            res = _process_pdf(f, output_dir)
-            if res is not None:
-                results.append(res)
-        progress.progress(1.0, text="✅ ניתוח הסתיים")
+        total = len(files)
+        progress = st.progress(0.0, text=f"מתחיל ניתוח של {total} קבצים...")
+        # שמירה על סדר ההעלאה — כל future ממופה ל-index המקורי שלו
+        ordered: list[dict | None] = [None] * total
+        completed = 0
+        workers = min(ASSEMBLY_PARALLELISM, total)
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            future_to_idx = {
+                executor.submit(_process_pdf, f, output_dir): (i, f.name)
+                for i, f in enumerate(files)
+            }
+            for future in as_completed(future_to_idx):
+                idx, fname = future_to_idx[future]
+                completed += 1
+                progress.progress(
+                    completed / total,
+                    text=f"✅ {completed}/{total} (האחרון: {fname})",
+                )
+                try:
+                    res = future.result()
+                except Exception:
+                    logger.exception("Assembly extract worker failed for %s", fname)
+                    res = None
+                if res is not None:
+                    ordered[idx] = res
+
+        results = [r for r in ordered if r is not None]
+        progress.progress(1.0, text=f"✅ ניתוח הסתיים — {len(results)}/{total} הצליחו")
         # תמונת מכלול (Overview Image) תמיד ראשונה — היא מייצגת את כל
         # השרטוטים יחד, לא משנה באיזה סדר הועלתה.
         results.sort(key=lambda r: 0 if r.get("_is_overview_image") else 1)

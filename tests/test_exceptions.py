@@ -177,7 +177,7 @@ def test_streamlit_level_for_generic_exception():
 
 # ─── Exception chaining ────────────────────────────────────────
 def test_exception_chains_with_from():
-    original = json_err = None
+    json_err = None
     try:
         try:
             raise ValueError("original problem")
@@ -191,7 +191,6 @@ def test_exception_chains_with_from():
 
 # ─── Run without pytest ────────────────────────────────────────
 if __name__ == "__main__":
-    import inspect
     tests = [
         (name, fn) for name, fn in globals().items()
         if name.startswith("test_") and callable(fn)

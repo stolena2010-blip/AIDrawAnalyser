@@ -172,6 +172,35 @@ st.markdown(
         background: white; border: 1px solid #dee2e6;
         border-radius: 0.6em; padding: 1em 1.2em; margin-bottom: 1em;
     }
+
+    /* ── באנר מצב עבודה (לפי מצב) ── */
+    .mode-banner {
+        color: white;
+        padding: 0.75em 1.2em;
+        border-radius: 0.6em;
+        margin-bottom: 1em;
+        display: flex; justify-content: space-between; align-items: center;
+        font-weight: 600;
+    }
+    .mode-banner .mode-title {
+        font-size: 1.15em; display: flex; align-items: center; gap: 0.45em;
+    }
+    .mode-banner .mode-tagline {
+        font-size: 0.85em; opacity: 0.92; font-weight: 400;
+    }
+    .mode-banner-single {
+        background: linear-gradient(135deg, #0891b2 0%, #06b6d4 100%);
+        box-shadow: 0 3px 10px rgba(8, 145, 178, 0.22);
+        border-right: 4px solid #155e75;
+    }
+    .mode-banner-assembly {
+        background: linear-gradient(135deg, #ea580c 0%, #f59e0b 100%);
+        box-shadow: 0 3px 10px rgba(234, 88, 12, 0.22);
+        border-right: 4px solid #9a3412;
+    }
+    /* גוון רקע עדין לאזור התוכן לפי המצב */
+    body[data-mode="single"]   { background: #f0fbfd; }
+    body[data-mode="assembly"] { background: #fff7ed; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -444,6 +473,32 @@ def _show_admin_cost_panel():
         else:
             st.caption("אין שינויים להגדרה")
 
+    # ─── ניהול cache ───
+    st.divider()
+    st.markdown("#### 🗄️ ניהול Cache")
+    from core.drawing_cache import (
+        cache_stats, clear_cache, cleanup_stale_cache, CACHE_VERSION,
+    )
+    _stats = cache_stats()
+    cs1, cs2, cs3 = st.columns(3)
+    cs1.metric("גרסה נוכחית", CACHE_VERSION)
+    cs2.metric("קבצים", _stats.get("count", 0))
+    cs3.metric("נפח", f"{_stats.get('size_mb', 0):.1f}MB")
+    cb1, cb2 = st.columns(2)
+    with cb1:
+        if st.button("🧹 נקה גרסאות ישנות", use_container_width=True,
+                     help="מוחק קבצי cache מ-CACHE_VERSIONים קודמים — שומר רק את הנוכחית"):
+            removed = cleanup_stale_cache(keep_versions=1)
+            st.success(f"✅ נמחקו {removed} קבצים מגרסאות ישנות")
+            st.rerun()
+    with cb2:
+        if st.button("🗑️ מחק את כל ה-cache", use_container_width=True,
+                     help="⚠️ הרצות הבאות יקראו ל-Azure מחדש לכל שרטוט (יקר)"):
+            removed = clear_cache()
+            st.warning(f"⚠️ נמחקו {removed} קבצים — הרצות הבאות = הוצאה מלאה")
+            st.rerun()
+
+    st.divider()
     if st.button("סגור", use_container_width=True):
         st.session_state["_show_admin"] = False
         st.rerun()
@@ -465,6 +520,31 @@ def _render_sidebar_footer():
                      key="open_admin_btn"):
             st.session_state["_show_admin"] = True
             st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════
+# באנר מצב עבודה — צבע שונה לכל מצב
+# ═══════════════════════════════════════════════════════════════
+_mode = st.session_state.get("app_mode", "single")
+if _mode == "assembly":
+    _banner_class = "mode-banner-assembly"
+    _banner_icon = "🧩"
+    _banner_title = "מצב מכלולים מרובים"
+    _banner_tag = "ניתוח קבוצת שרטוטים + קשרי אבא/בן"
+else:
+    _banner_class = "mode-banner-single"
+    _banner_icon = "🔍"
+    _banner_title = "מצב שרטוט בודד"
+    _banner_tag = "ניתוח מלא של PDF יחיד"
+
+st.markdown(
+    f'<div class="mode-banner {_banner_class}">'
+    f'<div class="mode-title">{_banner_icon} {_banner_title}</div>'
+    f'<div class="mode-tagline">{_banner_tag}</div>'
+    f'</div>'
+    f'<script>document.body.setAttribute("data-mode","{_mode}");</script>',
+    unsafe_allow_html=True,
+)
 
 
 # ═══════════════════════════════════════════════════════════════

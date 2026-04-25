@@ -48,7 +48,6 @@ jobs:
           import core.ai_helpers
           import core.drawing_cache
           import core.azure_client
-          import core.extractor
           import core.assembly
           import core.ocr_fallback
           import core.pdf_utils
@@ -56,8 +55,13 @@ jobs:
           import core.validators
           import core.cost_tracker
           import core.master_matcher
-          import core.prompts
           import core.assembly_prompts
+          import core._customer_data
+          from core.assembly import (
+              extract_assembly_drawing,
+              extract_assembly_overview_image,
+              analyze_relationships,
+          )
           from storage import save_handler, pdf_report
           print('All modules import cleanly')
           "

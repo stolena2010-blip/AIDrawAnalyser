@@ -68,28 +68,54 @@ AIDrawAnalyser/
 ├── core/                       # לוגיקה עסקית
 │   ├── __init__.py
 │   ├── azure_client.py         # ניהול clients ל-Vision / Reasoning
-│   ├── ai_helpers.py           # ★ call_vision/call_text/safe_call משותפים + retry decorator
-│   ├── exceptions.py           # ★ היררכיית custom exceptions + format_error_for_ui
-│   ├── drawing_cache.py        # ★ cache לפי MD5 + model + pipeline version
+│   ├── ai_helpers.py           # call_vision/call_text/safe_call משותפים + retry decorator
+│   ├── exceptions.py           # היררכיית custom exceptions + format_error_for_ui
+│   ├── drawing_cache.py        # cache לפי MD5 + model + pipeline version
 │   ├── pdf_utils.py            # PDF → JPEG base64 + image_file_to_b64 (PNG/JPG/WEBP)
 │   ├── ocr_fallback.py         # Tesseract fallback
-│   ├── prompts.py              # פרומפטים למצב 'שרטוט בודד'
-│   ├── extractor.py            # Pipeline 3-שלבי למצב 'בודד'
 │   ├── validators.py           # ולידציות post-processing (RAL/brands/coating/packing)
 │   ├── two_pass.py             # Two-Pass compare לשדות קריטיים בצביעה
-│   ├── master_matcher.py       # התאמת ציפויים למאגר Masters
+│   ├── master_matcher.py       # התאמת ציפויים למאגר Masters (מודול בודד)
 │   ├── cost_tracker.py         # מעקב עלויות לכל שרטוט (AZURE_SURCHARGE מ-env)
-│   ├── assembly_prompts.py     # פרומפטים נפרדים למצב 'מכלולים' + Overview Image
-│   └── assembly.py             # Pipeline למצב 'מכלולים' + ניתוח קשרים
+│   ├── pn_utils.py             # reconcile P/N · revision · drawing number
+│   ├── text_utils.py           # נירמול לקוחות/CAGE + תיקוני טקסט BOM
+│   ├── _customer_data.py       # מיפוי CAGE↔לקוח (data/customer_mappings.json)
+│   ├── assembly_prompts.py     # טוען פרומפטים חיצוניים מ-prompts/assembly/
+│   └── assembly/               # ★ Pipeline מאוחד לשני המצבים
+│       ├── __init__.py         # API ציבורי: extract_assembly_drawing / extract_assembly_overview_image / analyze_relationships
+│       ├── api.py              # _call_vision / _call_text_json (Azure helpers)
+│       ├── material.py         # חילוץ MATERIAL מ-OCR (label-based + direct regex)
+│       ├── post_process.py     # תיקונים / ולידציות אחרי Stage 1+2
+│       ├── pipeline.py         # extract_assembly_drawing + extract_assembly_overview_image
+│       └── relationships.py    # analyze_relationships (קשרי אבא/בן בין השרטוטים)
+│   ├── cost_tracker.py         # מעקב עלויות לכל שרטוט (AZURE_SURCHARGE מ-env)
+│   ├── assembly_prompts.py     # טוען פרומפטים + Overview Image
+│   └── assembly/               # Pipeline מאוחד
 │
-├── storage/                    # שכבת שמירה / ייצוא
+├── prompts/                     # קבצי פרומפטים חיצוניים
+│   ├── single/                  # legacy — לא בשימוש ב-runtime
+│   └── assembly/                # stage_1.txt, stage_2.txt, overview_image.txt, relationships_template.txt
+│
+├── storage/                     # שכבת שמירה / ייצוא
 │   ├── __init__.py
 │   ├── save_handler.py         # JSON + Excel
 │   └── pdf_report.py           # דוחות PDF (מלא + עץ מקוצר) + Tree Excel
 │
-├── tests/                      # Unit tests
-│   ├── test_master_matcher.py  # 26 בדיקות לאלגוריתם הציון (pytest)
-│   └── test_exceptions.py      # 20 בדיקות ל-exceptions (רץ עצמאית ללא pytest)
+├── tests/                       # 13 קבצי בדיקות + regression/
+│   ├── test_assembly_pipeline.py    # pipeline מלא עם mocks ל-Azure
+│   ├── test_assembly_material.py    # חילוץ MATERIAL
+│   ├── test_drawing_cache.py        # MD5 cache I/O
+│   ├── test_two_pass.py             # מיזוג שתי הרצות
+│   ├── test_pdf_utils.py            # מידור בודד / תמונה
+│   ├── test_ai_helpers.py           # retry / safe_call / fallback model
+│   ├── test_azure_client.py         # הגדרות client / runtime settings
+│   ├── test_customer_data.py        # CAGE ↔ customer
+│   ├── test_master_matcher.py       # 26 בדיקות ל-Master Matcher
+│   ├── test_validators.py           # validators (RAL/מותגים/אריזה)
+│   ├── test_exceptions.py           # 20 בדיקות ל-exceptions
+│   ├── test_pn_utils.py             # reconcile P/N
+│   ├── test_text_utils.py
+│   └── regression/                  # post_process regression
 │
 ├── draws/                      # PDF קלט (לבדיקות)
 └── output/                     # תוצאות ניתוח + costs.jsonl
@@ -199,7 +225,7 @@ DRAWING_CACHE_DISABLED=false
 
 ## Pipeline של מצב 'שרטוט בודד'
 
-מימוש ב-[core/extractor.py](core/extractor.py).
+מימוש ב-[core/assembly/pipeline.py](core/assembly/pipeline.py) דרך `extract_assembly_drawing()`.
 
 ```
 PDF
@@ -208,41 +234,30 @@ PDF
  │
  ├─► PyMuPDF: pdf_to_images(dpi=300) ──► [JPEG base64]
  │
- ├─► Stage 1 (Vision): basic info (ללא OCR)
+ ├─► Stage 1 (Vision): basic info
  │     • part_number, revision, drawing_number, customer, material
- │     • הוראות ייעודיות ל-RAFAEL (CAT NO. ≠ P.N. וכו')
+ │     • assembly_role, bom_items, quantity
  │
- ├─► OCR מותנה + Stage 1 Retry (רק אם Stage 1 חלש)
+ ├─► OCR מראש + Stage 1 Retry (רק אם זמין)
  │     • Tesseract → enhanced prompt → ניסיון נוסף
  │
- ├─► Stage 2 (Vision): processes
- │     • coating_processes (type, type_he, name, thickness, standard, rohs)
- │     • painting_processes
- │     • additional_processes
- │     • packaging_notes (he/en)
- │     • standards (רשימה שטוחה)
- │     • Retry אם הטקסט מזכיר ציפוי אבל המודל החזיר ריק
-│
-├─► Stage 2 Two-Pass (תנאי)
-│     • הרצה שנייה לשלב 2 כשנמצאים שדות RAL/מותג
-│     • compare_and_merge: זיהוי אי-עקביות בין הרצות
-│     • סימון ערכים חשודים כ-[VERIFY: ...]
+ ├─► Stage 2 (Vision): Production Routing Chart
+ │     • machining_processes, coating_processes, painting_processes
+ │     • inspection_processes, final_approval, additional_processes
+ │     • packaging_notes, standards, notes
  │
- ├─► Post-processing
+ ├─► Post-processing (validation + reconciliation)
  │     • חילוץ material מ-NOTES אם חסר
- │     • _reconcile_part_number: השלמה משם הקובץ / drawing_number
-│     • run_all_validators: בדיקות RAL, מותגים, סיווג ציפוי, אריזה
- │
- ├─► Stage 3 (Text): סיכום עברי קריא
- │
- ├─► match_all_coatings (master_matcher) ──► Top-3 לכל ציפוי
+ │     • _reconcile_part_number / drawing_number / revision
+ │     • run_all_validators: בדיקות RAL, מותגים, סיווג ציפוי, אריזה
  │
  ├─► save_cached_result (MD5 + model) ──► תוצאה זמינה ל-runs עתידיים
  │
-└─► תוצאה מלאה + _cost_info + _ocr_used + _validation_warnings
+ └─► תוצאה מלאה + _cost_info + _ocr_used + _validation_warnings
 ```
 
----
+> **הערה**: מצב 'שרטוט בודד' **לא כולל** Stage 3 (עברית) או master matching.
+> את זה עושה סקריפט חיצוני אם נדרש. ראה `core/master_matcher.py`.
 
 ## Pipeline של מצב 'מכלולים מרובים'
 
@@ -353,13 +368,19 @@ PDF
 | [core/exceptions.py](core/exceptions.py) | 15 custom exceptions עם עברית ידידותית + `format_error_for_ui` |
 | [core/drawing_cache.py](core/drawing_cache.py) | cache תוצאות חילוץ לפי MD5(file) + model + pipeline version |
 | [core/pdf_utils.py](core/pdf_utils.py) | המרת PDF לתמונות JPEG base64 (זורק `PDFError`/`ImageError` על פגמים) |
-| [core/ocr_fallback.py](core/ocr_fallback.py) | Tesseract fallback (מותנה: רק אם Stage 1 חלש) |
-| [core/prompts.py](core/prompts.py) | פרומפטים של מצב 'שרטוט בודד' (3 שלבים) |
-| [core/extractor.py](core/extractor.py) | תיזמור 3 שלבי החילוץ + reconcile + מאסטרים + cache |
-| [core/master_matcher.py](core/master_matcher.py) | אלגוריתם ציון התאמה ל-Masters.xlsx |
-| [core/cost_tracker.py](core/cost_tracker.py) | מצבר עלויות + לוג JSONL |
-| [core/assembly_prompts.py](core/assembly_prompts.py) | פרומפטים **נפרדים** למצב מכלולים |
-| [core/assembly.py](core/assembly.py) | Pipeline מכלולים + ניתוח קשרים + cache |
+| [core/ocr_fallback.py](core/ocr_fallback.py) | Tesseract fallback (מותנה: רק אם זמין) |
+| [core/validators.py](core/validators.py) | ולידציה post-processing (RAL, מותגים, סיווג ציפוי, הוראות אריזה) |
+| [core/two_pass.py](core/two_pass.py) | Two-Pass השוואה לשדות קריטיים בצביעה + זיהוי אי-עקביות |
+| [core/pn_utils.py](core/pn_utils.py) | reconcile P/N, drawing number, revision משמות קבצים ותוכן |
+| [core/text_utils.py](core/text_utils.py) | נירמול CAGE↔customer, טיפול בטקסט BOM |
+| [core/master_matcher.py](core/master_matcher.py) | אלגוריתם ציון התאמה (0-150) ל-Masters.xlsx — **משימוש יידני** |
+| [core/cost_tracker.py](core/cost_tracker.py) | מצבר עלויות + לוג JSONL + תוסף Azure |
+| [core/assembly_prompts.py](core/assembly_prompts.py) | טוען פרומפטים מ-`prompts/assembly/` |
+| [core/assembly/api.py](core/assembly/api.py) | `_call_vision` / `_call_text_json` (Azure helpers פנימיים) |
+| [core/assembly/material.py](core/assembly/material.py) | חילוץ MATERIAL מ-OCR (label-based + direct regex) |
+| [core/assembly/post_process.py](core/assembly/post_process.py) | תיקונים + ולידציות אחרי Stage 1+2 |
+| [core/assembly/pipeline.py](core/assembly/pipeline.py) | `extract_assembly_drawing()` + `extract_assembly_overview_image()` — **entry points** |
+| [core/assembly/relationships.py](core/assembly/relationships.py) | `analyze_relationships()` — קשרי אבא/בן בין שרטוטים |
 
 ### שכבת שמירה (`storage/`)
 
@@ -389,8 +410,7 @@ PDF
 
 ## עקרונות עיצוב מרכזיים
 
-1. **הפרדת מצבים** — `prompts.py` ↔ `assembly_prompts.py`, `extractor.py` ↔
-   `assembly.py`. שינוי במצב אחד לא נוגע באחר.
+1. **Pipeline מאוחד** — שני המצבים משתמשים ב-`core/assembly/` (מה שנקרא `extract_assembly_drawing()` מעל). הפרדה בין מצבים עשויה דרך flow שונה ב-UI ([app.py](app.py) / [ui_assembly.py](ui_assembly.py)), לא בלוגיקה הליבה.
 2. **Evidence-based extraction** — הפרומפטים אוסרים מפורשות על ניחושים;
    הציון משלים יחד עם RegEx fallback (material מ-NOTES, part_number משם הקובץ).
 3. **RTL native** — כל ה-UI ודוח ה-PDF משתמשים ב-`unicode-bidi:plaintext`

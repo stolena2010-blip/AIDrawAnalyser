@@ -5,7 +5,6 @@ Unit tests ל-master_matcher.
     pytest tests/ -v
 """
 import pandas as pd
-import pytest
 
 from core.master_matcher import (
     _detect_color,

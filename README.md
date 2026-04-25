@@ -1,21 +1,22 @@
 # 📐 AIDrawAnalyser
 
-[![CI](https://github.com/stolena2010-blip/draw_ai_lite/actions/workflows/ci.yml/badge.svg)](https://github.com/stolena2010-blip/draw_ai_lite/actions/workflows/ci.yml)
+[![CI](https://github.com/stolena2010-blip/AIDrawAnalyser/actions/workflows/ci.yml/badge.svg)](https://github.com/stolena2010-blip/AIDrawAnalyser/actions/workflows/ci.yml)
 
 אפליקציית Streamlit לניתוח שרטוטים טכניים (PDF) באמצעות Azure OpenAI Vision / Reasoning.
 
 ## תכולה
 
 ### 🔍 מצב 'שרטוט בודד'
-- העלאת PDF יחיד → חילוץ אוטומטי של שדות טכניים (P/N, revision, customer, material, תהליכי ציפוי/צביעה, תקנים, הערות)
-- סיכום בעברית
-- **התאמה למאסטרים** מ-Masters.xlsx (Top-3 לכל ציפוי, ציון 0-150)
-- **OCR מותנה** (Tesseract) — מופעל רק כש-Stage 1 חלש (חוסך זמן ברוב המקרים)
-- **Two-Pass אימות** לשדות קריטיים בצביעה (RAL / מותגים) לזיהוי אי-עקביות בין הרצות
+- העלאת PDF יחיד → חילוץ אוטומטי של שדות טכניים (P/N, revision, customer, material, תהליכי ציפוי/צביעה, עיבוד שבבי, תקנים, הערות)
+- **OCR אוטומטי** (Tesseract) כגיבוי לחילוץ שדות חסרים
 - **שכבת ולידציה בקוד**: RAL תקני, מותגי צבע, סיווג ציפויים, והוראות אריזה חשודות
 - הצגת **אזהרות ולידציה** ו-**המודל בפועל לכל שלב** במסך התוצאות
 - **Drawing Cache** אוטומטי לפי MD5 — חיסכון משמעותי ב-API runs חוזרים
-- שמירת תוצאות ל-**JSON** או **Excel רב-גיליוני** (Summary / Coatings / Paintings / Master_Matches / Standards / Warnings)
+- שמירת תוצאות ל-**JSON** או **Excel רב-גיליוני** (Summary / Coatings / Paintings / Standards / Warnings)
+
+> **הערה ארכיטקטונית:** ממאי 2026 שני המצבים משתמשים ב-pipeline **מאוחד** תחת `core/assembly/`.
+> המצב ה'בודד' הישן (`core/extractor.py` + Stage 3 עברי + master matching אוטומטי) הוסר.
+> מודול `core/master_matcher.py` עדיין קיים לשימוש ידני / סקריפטים.
 
 ### 🧩 מצב 'מכלולים מרובים'
 - העלאת מספר PDFים יחד **או** תמונת Exploded View (PNG/JPG/WEBP)
@@ -91,35 +92,52 @@ AIDrawAnalyser/
 ├── app.py                  ← Streamlit entry (מצב 'שרטוט בודד')
 ├── ui_assembly.py          ← מסך 'מכלולים מרובים'
 ├── core/
-│   ├── azure_client.py     ← Azure OpenAI wrapper
-│   ├── ai_helpers.py       ← ★ חדש: call_vision/call_text/safe_call משותפים + retry
-│   ├── exceptions.py       ← ★ חדש: היררכיית custom exceptions (עברית ידידותית)
-│   ├── drawing_cache.py    ← ★ חדש: cache לפי MD5 (חיסכון ב-API)
-│   ├── pdf_utils.py        ← PDF/Image → base64
-│   ├── prompts.py          ← Stage 1/2/3 prompts (בודד)
-│   ├── extractor.py        ← pipeline ראשי (בודד)
-│   ├── master_matcher.py   ← התאמה למאסטרים (1239 פריטים)
-│   ├── cost_tracker.py     ← מעקב עלויות
-│   ├── ocr_fallback.py     ← Tesseract fallback
-│   ├── validators.py       ← ולידציה לאחר חילוץ (RAL/brands/coating/packing)
-│   ├── two_pass.py         ← השוואת שתי הרצות לשדות קריטיים
-│   ├── assembly_prompts.py ← פרומפטים למצב מכלולים + Overview Image
-│   └── assembly.py         ← pipeline מכלולים + ניתוח קשרים
+│   ├── azure_client.py        ← Azure OpenAI wrapper
+│   ├── ai_helpers.py          ← call_vision/call_text/safe_call משותפים + retry
+│   ├── exceptions.py          ← היררכיית custom exceptions (עברית ידידותית)
+│   ├── drawing_cache.py       ← cache לפי MD5 (חיסכון ב-API)
+│   ├── pdf_utils.py           ← PDF/Image → base64 (זורק PDFError/ImageError)
+│   ├── ocr_fallback.py        ← Tesseract fallback
+│   ├── master_matcher.py      ← התאמה למאסטרים (1239 פריטים) — שימוש ידני
+│   ├── cost_tracker.py        ← מעקב עלויות
+│   ├── validators.py          ← ולידציה לאחר חילוץ (RAL/brands/coating/packing)
+│   ├── two_pass.py            ← השוואת שתי הרצות לשדות קריטיים
+│   ├── pn_utils.py            ← reconcile של P/N · revision · drawing number
+│   ├── text_utils.py          ← נירמול לקוח/CAGE + תיקוני טקסט
+│   ├── assembly_prompts.py    ← טוען פרומפטים חיצוניים מ-prompts/assembly/
+│   └── assembly/              ← ★ Pipeline מאוחד לשני המצבים
+│       ├── api.py             ← _call_vision / _call_text_json
+│       ├── material.py        ← חילוץ MATERIAL מ-OCR
+│       ├── post_process.py    ← ולידציות + תיקונים אחרי Stage 1+2
+│       ├── pipeline.py        ← extract_assembly_drawing + extract_assembly_overview_image
+│       └── relationships.py   ← analyze_relationships בין שרטוטים
 ├── prompts/
-│   ├── single/             ← קבצי פרומפטים חיצוניים למצב שרטוט בודד
-│   └── assembly/           ← קבצי פרומפטים חיצוניים למצב מכלולים
+│   ├── single/                ← קבצי פרומפטים חיצוניים (legacy)
+│   └── assembly/              ← פרומפטים פעילים: stage_1.txt, stage_2.txt, overview_image.txt, relationships_template.txt
 ├── storage/
-│   ├── save_handler.py     ← JSON + Excel רב-גיליוני (6 sheets)
-│   └── pdf_report.py       ← דוחות PDF (מלא + עץ מוצר) + Excel עץ
-├── tests/
-│   ├── test_master_matcher.py  ← 26 בדיקות ל-Master Matcher
-│   └── test_exceptions.py      ← 20 בדיקות ל-exceptions (לא דורש pytest)
-├── output/                 ← תוצאות + costs.jsonl
-├── Masters.xlsx            ← מאגר ציפויים (חובה למצב 'בודד')
+│   ├── save_handler.py        ← JSON + Excel רב-גיליוני
+│   └── pdf_report.py          ← דוחות PDF (מלא + עץ מוצר) + Excel עץ
+├── tests/                     ← 13 קבצי בדיקות + תיקיית regression/
+│   ├── test_assembly_pipeline.py
+│   ├── test_assembly_material.py
+│   ├── test_drawing_cache.py
+│   ├── test_two_pass.py
+│   ├── test_pdf_utils.py
+│   ├── test_ai_helpers.py
+│   ├── test_azure_client.py
+│   ├── test_customer_data.py
+│   ├── test_master_matcher.py
+│   ├── test_validators.py
+│   ├── test_exceptions.py
+│   ├── test_pn_utils.py
+│   ├── test_text_utils.py
+│   └── regression/            ← בדיקות regression ל-post_processing
+├── output/                    ← תוצאות + costs.jsonl
+├── Masters.xlsx               ← מאגר ציפויים (לשימוש ידני ע"י master_matcher)
 ├── requirements.txt
 ├── .env.example
-├── PROJECT_OVERVIEW.md     ← סקירה מפורטת
-└── CHANGELOG.md            ← שינויים אחרונים
+├── PROJECT_OVERVIEW.md        ← סקירה מפורטת
+└── CHANGELOG.md               ← שינויים אחרונים
 ```
 
 ראה [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md) לסקירה טכנית מלאה.

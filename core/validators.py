@@ -5,6 +5,11 @@
 import re
 from difflib import SequenceMatcher
 
+from core._customer_data import (
+    CUSTOMER_INTERNAL_SPEC_PATTERNS as _CUSTOMER_INTERNAL_SPEC_PATTERNS,
+    PN_PREFIX_TO_CUSTOMER as _PN_PREFIX_TO_CUSTOMER,
+)
+
 # ─── RAL codes ───────────────────────────────────────────────────────────────
 
 VALID_RAL_CODES = {
@@ -247,6 +252,97 @@ def validate_packing_note(packaging_notes: dict | str) -> dict | None:
     return None
 
 
+# ─── Customer ↔ P/N prefix consistency ───────────────────────────────────────
+# המפה _PN_PREFIX_TO_CUSTOMER נטענת מ-data/customer_mappings.json (ראה import).
+# אם P/N מתחיל בקידומת ידועה — חייב להיות מתאים ל-customer שחולץ.
+# מזהה הזיות של שם-לקוח כשה-P/N עצמו ברור.
+
+
+def validate_customer_prefix_consistency(report_json: dict) -> list[dict]:
+    """
+    בודק שה-customer שחולץ מתאים לקידומת ה-P/N. מזהה הזיות:
+    למשל 'BAS12345' אבל customer='RAFAEL' — סותר.
+
+    לא מדגלי אם customer ריק (אפשר להשלים דרך infer_customer_from_cage).
+    לא מדגלי אם הקידומת לא במפה (לקוחות לא-ידועים).
+    """
+    warnings: list[dict] = []
+    pn = (report_json.get("part_number") or "").strip().upper()
+    customer = (report_json.get("customer") or "").strip()
+    if not pn or not customer:
+        return warnings
+
+    # חפש קידומת תואמת (מארוך לקצר — "PWRL" לפני "P")
+    matched_prefix = None
+    matched_customer = None
+    for prefix in sorted(_PN_PREFIX_TO_CUSTOMER.keys(), key=len, reverse=True):
+        if pn.startswith(prefix):
+            matched_prefix = prefix
+            matched_customer = _PN_PREFIX_TO_CUSTOMER[prefix]
+            break
+
+    if not matched_prefix or not matched_customer:
+        return warnings
+
+    # השווה באופן עדין: "RAFAEL" matches "RAFAEL Advanced Defense Systems Ltd."
+    customer_upper = customer.upper()
+    matched_upper = matched_customer.upper()
+    if matched_upper in customer_upper or customer_upper in matched_upper:
+        return warnings  # תואם — הכל טוב
+
+    warnings.append({
+        "type": "CUSTOMER_PREFIX_MISMATCH",
+        "severity": "HIGH",
+        "source": "customer",
+        "value": f"PN={pn[:20]}, customer='{customer[:40]}'",
+        "message": (
+            f"ה-P/N '{pn}' מתחיל ב-'{matched_prefix}' שבדרך כלל שייך ל-"
+            f"'{matched_customer}', אבל ה-customer שחולץ הוא '{customer}'. "
+            "אפשר שהמודל הזיה את שם הלקוח — בדוק ידנית."
+        ),
+    })
+    return warnings
+
+
+# ─── Customer-internal SPEC whitelist ─────────────────────────────────────────
+# המפה _CUSTOMER_INTERNAL_SPEC_PATTERNS נטענת מ-data/customer_mappings.json.
+# אחרי שראינו הרבה "SUSPICIOUS_STANDARD" שהם בעצם קודי לקוח פנימיים,
+# מוסיפים whitelist ייחודי לכל לקוח שמחזיר כ-INFO במקום HIGH.
+
+
+def validate_customer_internal_specs(report_json: dict) -> list[dict]:
+    """
+    עובר על standards שנלקחו. אם ערך נראה כמו קוד-לקוח-פנימי של הלקוח הספציפי —
+    מסמן כ-INFO (לא HIGH). לא מוסיף את הערך כחוקי — פשוט מרגיע את validate_standards.
+
+    ⚠️ לא משמש כ-filter של validate_standards ישירות (הן רצות נפרדות).
+    במקום זה, חוזר על standards ונותן פירוש חברתי.
+    """
+    warnings: list[dict] = []
+    customer = (report_json.get("customer") or "").strip()
+    if not customer:
+        return warnings
+    patterns = _CUSTOMER_INTERNAL_SPEC_PATTERNS.get(customer, [])
+    if not patterns:
+        return warnings
+    for std in report_json.get("standards", []) or []:
+        std_text = str(std or "").strip()
+        if not std_text:
+            continue
+        if any(pat.match(std_text) for pat in patterns):
+            warnings.append({
+                "type": "CUSTOMER_INTERNAL_SPEC",
+                "severity": "INFO",
+                "source": "standards",
+                "value": std_text,
+                "message": (
+                    f"'{std_text}' הוא קוד פנימי של {customer} — לא תקן רשמי "
+                    "אבל לגיטימי. שווה לבדוק ידנית אם רלוונטי."
+                ),
+            })
+    return warnings
+
+
 # ─── Missing categories: Pickling / Hydrogen Embrittlement ───────────────────
 # תהליכים שהמודל פוספם לעיתים קרובות — מילות מפתח ב-NOTES שמחייבות entry
 # ב-additional_processes. אם המילה בטקסט אבל אין entry תואם → אזהרה.
@@ -364,21 +460,128 @@ _KNOWN_STANDARD_PATTERNS = [
     re.compile(r"^NACE[\s\-]", re.IGNORECASE),          # Corrosion engineers
     re.compile(r"^EN[\s\-]?ISO[\s\-]?\d", re.IGNORECASE),  # EN ISO xxxx (composite)
     re.compile(r"^BS[\s\-]?EN[\s\-]?ISO[\s\-]?\d", re.IGNORECASE),
+    # Additional legitimate standard bodies found in Batch 4
+    re.compile(r"^TT[\s\-]?[A-Z]", re.IGNORECASE),      # TT-C-490 (Federal Specification)
+    re.compile(r"^AISI[\s\-]?\d", re.IGNORECASE),       # AISI 4340 (steel grades)
+    re.compile(r"^UNS[\s\-]?[A-Z]?\d", re.IGNORECASE),  # UNS S30400 (Unified Numbering System)
+    re.compile(r"^RAFAEL\s+PROCEDURE", re.IGNORECASE),  # RAFAEL PROCEDURE 18.00.10
+    re.compile(r"^P[\.\s]*S[\.\s]*\d", re.IGNORECASE),  # P.S.231900, P S 231900, PS 123
+    # Customer internal / documentation specs
+    re.compile(r"^RAFDOCS[\s\-]?\d", re.IGNORECASE),    # RAFAEL internal docs
+    re.compile(r"^TILDOCS[\s\-]?#?\d", re.IGNORECASE),  # RAFAEL internal
+    re.compile(r"^PS[\s\-]?TILDOCS[\s\-]?#?\d", re.IGNORECASE),  # RAFAEL — PS-TILDOCS#172373
+    re.compile(r"^PS[\s\-]?DOC[\s\-]?\d", re.IGNORECASE),        # RAFAEL — PS-DOC0002945
+    re.compile(r"^PS[\s\-]?\d+\.?\d*", re.IGNORECASE),  # RAFAEL PS-xxx.xx (double-check)
+    re.compile(r"^SM[\s\-]?\d+\.?\d*", re.IGNORECASE),  # RAFAEL SM-xxx
+    # Misc US federal specs
+    re.compile(r"^FED\.?\s*STD\.?\s*\-?\d", re.IGNORECASE),  # FED. STD. 595A
+    re.compile(r"^A\-A[\s\-]?\d", re.IGNORECASE),           # A-A-56032 (Commercial Item Description)
+    re.compile(r"^ANSI/ASQ", re.IGNORECASE),                # ANSI/ASQ Z1.4
+    re.compile(r"^ANSI/ASME", re.IGNORECASE),
+    re.compile(r"^ANSI/IEEE", re.IGNORECASE),
+    # RAFAEL internal: GEN_1111-1 / GEN.1111-1 / GEN 1111-1
+    re.compile(r"^GEN[\s\._]\s*\d", re.IGNORECASE),
 ]
+
+
+# ─── Ignore-list: ערכים שלא נכנסים ל-standards אבל אינם הזיות ─────────────────
+# טקסט גנרי שהמודל מחזיר בלי תקן מספרי ספציפי — צריך להסיר (רעש), לא לדיגלי
+# כ-HIGH severity. רוב אלו אמורים ללכת ל-general_instructions / ndt_processes /
+# welding_processes, לא ל-standards.
+_STANDARDS_IGNORE_SET = {
+    s.upper() for s in {
+        # Generic uppercase text (not a spec ID)
+        "ISO STANDARDS", "ISO STANDARD", "MIL STANDARDS", "MIL STANDARD",
+        "ASME STANDARDS", "SAE STANDARDS", "ASTM STANDARDS",
+        "APPLICABLE STANDARDS", "SAFETY STANDARDS", "INDUSTRY STANDARDS",
+        # NDT methods — belong in ndt_processes, not standards
+        "VT", "PT", "MT", "UT", "RT", "PT TYPE I", "PT TYPE L", "VT TYPE I",
+        # Welding methods — belong in welding_processes
+        "GTAW", "GMAW", "SMAW", "FCAW", "SAW", "TIG", "MIG", "WPS",
+        # Compliance flags — not standards
+        "ROHS", "ROHS COMPLIANT", "ROHS COMPLIANCE", "ROHS DIRECTIVE",
+        "ROHS II", "ROHS III", "REACH", "REACH COMPLIANCE",
+        # Sampling/quality shorthand that's not a standard number
+        "SQUEGLIA",
+    }
+}
+
+
+# Additional REGEX-based ignore patterns (for cases that aren't exact-match).
+# These run AFTER _STANDARDS_IGNORE_SET lookup.
+_STANDARDS_IGNORE_PATTERNS = [
+    re.compile(r"^ROHS\b.*", re.IGNORECASE),             # RoHS + anything trailing
+    re.compile(r"^REACH\b.*", re.IGNORECASE),
+    re.compile(r"^IPC\s+STANDARDS?$", re.IGNORECASE),
+]
+
+
+def _is_ral_color(s: str) -> bool:
+    """קוד RAL הוא צבע, לא תקן. מסומן ל-IGNORE."""
+    return bool(re.match(r"^RAL[\s\-]?\d{3,4}", s.strip(), re.IGNORECASE))
+
+
+def _normalize_standard(s: str) -> str:
+    """
+    מנרמל תקן לצורך השוואה מול whitelist/ignore-list:
+      - מסיר רווחים כפולים
+      - מאחד רווחים/מקפים מיותרים (e.g., 'PS- 111.21' → 'PS-111.21')
+      - מחזיר UPPER
+    """
+    if not s:
+        return ""
+    out = re.sub(r"\s+", " ", str(s).strip())
+    # Collapse "PS- 111" → "PS-111" (רווח מיותר אחרי מקף)
+    out = re.sub(r"([A-Z])-\s+(\d)", r"\1-\2", out, flags=re.IGNORECASE)
+    # Collapse "Y14. 6" → "Y14.6"
+    out = re.sub(r"(\w)\.\s+(\d)", r"\1.\2", out)
+    return out.upper()
 
 
 def validate_standards(report_json: dict) -> list[dict]:
     """
     מסמן תקנים עם קידומת גוף-תקינה לא מוכרת — מצב הזיה נפוץ.
     דוגמה נתפסת: 'AWI-STD-1916' (הגוף 'AWI' לא קיים).
+
+    דילוגים (לא מדגליים):
+      • ערכים ב-_STANDARDS_IGNORE_SET (טקסט גנרי / שיטות NDT/ריתוך / ROHS)
+      • תקנים שמתחילים בקידומת מוכרת (אחרי נרמול רווחים/מקפים)
+      • קוד פנימי מוכר של ה-customer שחולץ (I-* ל-KRETOS, 5902* ל-IAI וכו')
     """
     warnings: list[dict] = []
+    # Customer-internal whitelist (אם customer ידוע — נרחיב את הקידומות המקובלות)
+    customer = (report_json.get("customer") or "").strip()
+    customer_patterns = _CUSTOMER_INTERNAL_SPEC_PATTERNS.get(customer, [])
+
     for std in report_json.get("standards", []) or []:
         std_text = str(std or "").strip()
         if not std_text:
             continue
-        if any(pat.match(std_text) for pat in _KNOWN_STANDARD_PATTERNS):
+
+        # Normalize before matching — fixes "PS- 111.21", "Y14. 6", "FED. STD. 595A"
+        normalized = _normalize_standard(std_text)
+
+        # Dilug מוחלט — לא מדיגלים (רעש ידוע, לא הזיות)
+        if normalized in _STANDARDS_IGNORE_SET:
             continue
+
+        # Regex-based ignore (למקרים עם טקסט נוסף כמו "RoHS DIRECTIVE")
+        if any(pat.match(std_text) for pat in _STANDARDS_IGNORE_PATTERNS):
+            continue
+
+        # RAL codes — צבעים ולא תקנים; הפרומפט כבר מנחה שלא להכניס, אבל
+        # קיימים ב-cache ישן וה-validator צריך להיות מודע
+        if _is_ral_color(std_text):
+            continue
+
+        # Customer-internal prefix — לקוח מוכר עם קוד פנימי מוכר
+        if any(pat.match(std_text) for pat in customer_patterns):
+            continue
+
+        # מסכם קידומות ידועות — בדיקה על הערך המנורמל
+        if any(pat.match(normalized) for pat in _KNOWN_STANDARD_PATTERNS):
+            continue
+
         warnings.append({
             "type": "SUSPICIOUS_STANDARD",
             "severity": "HIGH",
@@ -386,8 +589,8 @@ def validate_standards(report_json: dict) -> list[dict]:
             "value": std_text,
             "message": (
                 f"התקן '{std_text}' אינו תואם גוף תקינה מוכר "
-                "(MIL/AMS/ASTM/ASME/AWS/ISO/EN/DIN/BS/SAE/NAS/ANSI/IPC/UL/...) — "
-                "חשד להזיה של המודל."
+                "(MIL/AMS/ASTM/ASME/AWS/ISO/EN/DIN/BS/SAE/NAS/ANSI/IPC/UL/"
+                "RAFDOCS/PS-/A-A-/...) — חשד להזיה של המודל."
             ),
         })
     return warnings
@@ -407,6 +610,7 @@ def run_all_validators(report_json: dict) -> list[dict]:
     ))
     warnings.extend(validate_standards(report_json))
     warnings.extend(validate_surface_prep_and_post_process(report_json))
+    warnings.extend(validate_customer_prefix_consistency(report_json))
     packing_warning = validate_packing_note(
         report_json.get("packaging_notes", {})
     )
