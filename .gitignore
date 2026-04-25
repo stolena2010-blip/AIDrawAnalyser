@@ -43,10 +43,14 @@ demo_pack/*
 !demo_pack/README.md
 !demo_pack/interactive_demo.html
 
-# Sample drawings — only tracked content is the README explaining how to populate
+# Sample drawings — README + the 3 generated demo PDFs are tracked.
+# Real customer drawings (if accidentally placed here) are still ignored.
 sample_drawings/*
 !sample_drawings/.gitkeep
 !sample_drawings/README.md
+!sample_drawings/01_*.pdf
+!sample_drawings/02_*.pdf
+!sample_drawings/03_*.pdf
 
 # Backup files
 *.bak
