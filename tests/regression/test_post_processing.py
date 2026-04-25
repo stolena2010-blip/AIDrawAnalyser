@@ -39,7 +39,7 @@ from core.validators import (
     validate_coating_classification,
 )
 
-from tests.regression.scenarios import SCENARIOS
+from .scenarios import SCENARIOS  # noqa: TID252  — relative import: tests/ is not a package
 
 
 def _apply_pipeline(stage1: dict, stage2: dict, filename: str) -> tuple[dict, dict, list[dict]]:
