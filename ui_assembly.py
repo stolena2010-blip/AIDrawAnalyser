@@ -14,6 +14,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from core import audit, notifications
 from core.assembly import (
     analyze_relationships,
     extract_assembly_drawing,
@@ -402,6 +403,10 @@ def render_review_edit_form(result: dict, *, key_prefix: str = "review") -> bool
         ):
             result["_review_status"] = "reviewed"
             result["_review_timestamp"] = _dt.now().isoformat()
+            audit.log_approve(
+                result.get("part_number") or "?",
+                has_edits=bool(result.get("_user_edits")),
+            )
             st.rerun()
     with approve_cols[1]:
         st.caption(
@@ -640,6 +645,203 @@ def _render_drawing_card(d: dict):
 
     with st.expander("📄 JSON מלא"):
         st.json({k: v for k, v in d.items() if not k.startswith("_")})
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Tabbed view of drawing details — splits the same content into 5 tabs
+# for less cognitive load. Used by app.py + ui_assembly.py.
+# ═══════════════════════════════════════════════════════════════════
+
+def _step_table(items: list, headers=("שלב", "אנגלית", "עברית", "פרטים"),
+                keys=("step_no", "name_en", "name_he", "details")) -> None:
+    if not items:
+        return
+    rows = []
+    for it in items:
+        if isinstance(it, dict):
+            rows.append({h: it.get(k, "") for h, k in zip(headers, keys, strict=True)})
+        else:
+            rows.append({headers[0]: "", headers[1]: str(it), headers[2]: "", headers[3]: ""})
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
+def render_drawing_tabs(d: dict) -> None:
+    """תצוגה מאורגנת בטאבים — אלטרנטיבה ל-_render_drawing_card הישן.
+
+    5 טאבים מארגנים את אותו התוכן לפי קונטקסט קוגניטיבי:
+        🎯 סקירה  ·  📋 BOM  ·  🔧 תהליכים  ·  📜 תקנים  ·  📦 אריזה+הערות
+
+    מקטין עומס ויזואלי במסך תוצאות. ה-_render_drawing_card הישן נשאר
+    זמין למודולים שעדיין משתמשים בו.
+    """
+    bom_items = d.get("bom_items") or []
+    has_bom = bool(bom_items)
+    standards = d.get("standards") or []
+    pkg = d.get("packaging_notes") or {}
+    notes = (d.get("notes") or "").strip()
+
+    has_processes = any([
+        d.get("machining_processes"), d.get("welding_processes"),
+        d.get("heat_treatment_processes"), d.get("coating_processes"),
+        d.get("painting_processes"), d.get("ndt_processes"),
+        d.get("inspection_processes"), d.get("final_approval"),
+        d.get("additional_processes"),
+    ])
+
+    tab_overview, tab_bom, tab_proc, tab_std, tab_pack = st.tabs([
+        "🎯 סקירה",
+        f"📋 BOM ({len(bom_items)})" if has_bom else "📋 BOM",
+        "🔧 תהליכים" if has_processes else "🔧 תהליכים (ריק)",
+        f"📜 תקנים ({len(standards)})" if standards else "📜 תקנים",
+        "📦 אריזה והערות",
+    ])
+
+    # ─── Tab 1: Overview (header card + general instructions + environment) ───
+    with tab_overview:
+        pn = d.get("part_number") or "—"
+        dn = d.get("drawing_number") or "—"
+        rev = d.get("revision") or "—"
+        cust = d.get("customer") or "—"
+        mat = d.get("material") or "—"
+        qty = d.get("quantity") or "—"
+        role = d.get("assembly_role") or "—"
+        st.markdown(
+            f'<div dir="rtl" style="unicode-bidi:plaintext; '
+            f'background:linear-gradient(135deg,#eef5ff 0%,#e8f5e9 100%); '
+            f'border:2px solid #0d6efd; border-radius:0.7em; padding:1em 1.2em; '
+            f'margin-bottom:0.8em; font-size:0.95em; line-height:1.7;">'
+            f'<div style="font-size:1.05em; font-weight:700; color:#0d6efd; '
+            f'margin-bottom:0.4em;">🎯 פרטי השרטוט</div>'
+            f'<div><span style="color:#6c757d;">פריט:</span> <b>{pn}</b> &nbsp;·&nbsp; '
+            f'<span style="color:#6c757d;">שרטוט:</span> <b>{dn}</b> &nbsp;·&nbsp; '
+            f'<span style="color:#6c757d;">גרסה:</span> <b>{rev}</b> &nbsp;·&nbsp; '
+            f'<span style="color:#6c757d;">לקוח:</span> <b>{cust}</b></div>'
+            f'<div style="margin-top:0.4em;"><span style="color:#6c757d;">חומר:</span> <b>{mat}</b> '
+            f'&nbsp;·&nbsp; <span style="color:#6c757d;">תפקיד:</span> <b>{role}</b> '
+            f'&nbsp;·&nbsp; <span style="color:#6c757d;">כמות:</span> <b>{qty}</b></div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        gen_instr = d.get("general_instructions") or []
+        if gen_instr and isinstance(gen_instr, list):
+            with st.expander("📜 הוראות כלליות", expanded=False):
+                for item in gen_instr:
+                    if isinstance(item, str) and item.strip():
+                        st.markdown(f"- {item.strip()}")
+        env_req = d.get("environment_requirements") or []
+        if env_req and isinstance(env_req, list):
+            with st.expander("🌡️ תנאי סביבה / Clean Room", expanded=True):
+                for item in env_req:
+                    if isinstance(item, str) and item.strip():
+                        st.markdown(f"- {item.strip()}")
+
+    # ─── Tab 2: BOM ───
+    with tab_bom:
+        if not has_bom:
+            st.caption("אין פריטי BOM בשרטוט הזה (לרוב = שרטוט PART בודד).")
+        else:
+            rows = []
+            for it in bom_items:
+                if isinstance(it, dict):
+                    rows.append({
+                        "Item": it.get("item_no", ""),
+                        "Part Number": it.get("part_number", ""),
+                        "Description": it.get("description", ""),
+                        "Qty": it.get("qty", ""),
+                    })
+            if rows:
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+
+    # ─── Tab 3: Processes (machining/welding/heat/coating/painting/NDT/inspection/final/additional) ───
+    with tab_proc:
+        if not has_processes:
+            st.caption("לא נמצאו תהליכי ייצור בשרטוט.")
+        if d.get("machining_processes"):
+            st.markdown("##### 🔧 עיבוד שבבי")
+            _step_table(d["machining_processes"])
+        if d.get("welding_processes"):
+            st.markdown("##### 🔥 ריתוך")
+            _step_table(d["welding_processes"])
+        if d.get("heat_treatment_processes"):
+            st.markdown("##### 🌡️ טיפול חום")
+            _step_table(d["heat_treatment_processes"])
+        coatings = d.get("coating_processes") or []
+        if coatings:
+            st.markdown("##### 🎨 ציפויים / טיפול שטח")
+            rows = []
+            for c in coatings:
+                if isinstance(c, dict):
+                    rows.append({
+                        "שלב": c.get("step_no", ""),
+                        "סוג (HE)": c.get("type_he", ""),
+                        "סוג (EN)": c.get("type", ""),
+                        "תיאור": c.get("name", ""),
+                        "תקן": c.get("standard", ""),
+                        "עובי": c.get("thickness", ""),
+                        "RoHS": "✓" if c.get("rohs") else "",
+                    })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+        paintings = d.get("painting_processes") or []
+        if paintings:
+            st.markdown("##### 🖌️ צביעות")
+            rows = []
+            for p in paintings:
+                if isinstance(p, dict):
+                    rows.append({
+                        "שלב": p.get("step_no", ""),
+                        "סוג (HE)": p.get("type_he", ""),
+                        "סוג (EN)": p.get("type", ""),
+                        "תיאור": p.get("name", ""),
+                        "תקן": p.get("standard", ""),
+                        "עובי": p.get("thickness", ""),
+                        "RoHS": "✓" if p.get("rohs") else "",
+                    })
+            st.dataframe(rows, use_container_width=True, hide_index=True)
+        if d.get("ndt_processes"):
+            st.markdown("##### 🔬 בדיקות NDT")
+            _step_table(d["ndt_processes"])
+        if d.get("inspection_processes"):
+            st.markdown("##### 🔍 בדיקות")
+            _step_table(d["inspection_processes"])
+        if d.get("final_approval"):
+            st.markdown("##### ✅ אישור סופי")
+            _step_table(d["final_approval"])
+        if d.get("additional_processes"):
+            st.markdown("##### 🛠️ תהליכים מלווים")
+            _step_table(d["additional_processes"])
+
+    # ─── Tab 4: Standards ───
+    with tab_std:
+        if not standards:
+            st.caption("לא נמצאו תקנים בשרטוט.")
+        else:
+            st.markdown("##### 📜 כל התקנים שמופיעים בשרטוט")
+            st.markdown(" &nbsp;·&nbsp; ".join(f"`{s}`" for s in standards))
+
+    # ─── Tab 5: Packaging + Notes + JSON ───
+    with tab_pack:
+        if isinstance(pkg, dict) and (pkg.get("he") or pkg.get("en")):
+            st.markdown("##### 📦 אריזה")
+            if pkg.get("he"):
+                st.markdown(
+                    f'<div dir="rtl" style="unicode-bidi:plaintext; background:#fff3cd; '
+                    f'color:#664d03; padding:0.6em 0.9em; border-radius:0.4em; margin-bottom:0.4em;">'
+                    f'🇮🇱 {pkg["he"]}</div>',
+                    unsafe_allow_html=True,
+                )
+            if pkg.get("en"):
+                st.markdown(
+                    f'<div dir="ltr" style="background:#fff3cd; color:#664d03; '
+                    f'padding:0.6em 0.9em; border-radius:0.4em;">🇬🇧 {pkg["en"]}</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("לא נמצאה דרישת אריזה.")
+        if notes:
+            st.markdown("##### 📝 הערות (NOTES)")
+            st.info(notes)
+        with st.expander("📄 JSON מלא (admin/debug)", expanded=False):
+            st.json({k: v for k, v in d.items() if not k.startswith("_")})
 
 
 _SEVERITY_ICON = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡", "LOW": "🟢"}
@@ -938,6 +1140,26 @@ def render_assembly_mode(output_dir: Path):
                 cost_usd=total_cost,
                 cache_hit=(total_cost == 0),
             )
+            for r in results:
+                audit.log_extract(
+                    r.get("source_filename", "?"),
+                    cost_usd=(r.get("_cost_info") or {}).get("total_cost_usd", 0),
+                    cache_hit=(r.get("_cost_info") or {}).get("total_cost_usd", 0) == 0,
+                    mode="assembly",
+                )
+            # Send batch completion notification (only if any channel configured)
+            if notifications.is_any_channel_configured():
+                notification_results = notifications.notify_batch_complete(
+                    drawing_count=total,
+                    success_count=len(results),
+                    failed_count=total - len(results),
+                    total_cost_usd=total_cost,
+                    total_warnings=total_warnings,
+                )
+                channels_sent = [k for k, v in notification_results.items()
+                                 if v and k != "disabled"]
+                if channels_sent:
+                    st.caption(f"📬 התראת batch נשלחה ל: {', '.join(channels_sent)}")
         except Exception:
             logger.warning("history logging failed", exc_info=True)
         if pn_corrections:
@@ -1006,8 +1228,7 @@ def render_assembly_mode(output_dir: Path):
 
     # ─── 4. תצוגה מלאה של השרטוט הנבחר ───
     render_summary_card(results[idx])
-    with st.expander("📋 פירוט מלא של השרטוט", expanded=True):
-        _render_drawing_card(results[idx])
+    render_drawing_tabs(results[idx])
     _render_validation_warnings(results[idx])
 
     # ─── 4.5 Review של השרטוט הנוכחי ───

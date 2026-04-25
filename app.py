@@ -9,6 +9,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from core import audit
 from core.assembly import extract_assembly_drawing
 from core.azure_client import (
     MODEL_GPT_4O,
@@ -33,10 +34,10 @@ from storage.pdf_report import (
 from storage.save_handler import save_to_json
 from ui_assembly import (
     _get_review_status,
-    _render_drawing_card,
     _render_export_pair,
     _render_stage_model_feedback as _asm_render_stage_model_feedback,
     _render_validation_warnings as _asm_render_validation_warnings,
+    render_drawing_tabs,
     render_review_edit_form,
     render_summary_card,
 )
@@ -882,6 +883,115 @@ if st.session_state.get("_show_stats_dashboard"):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Diff View — השוואת שני שרטוטים (revision A → B)
+# ═══════════════════════════════════════════════════════════════
+@st.dialog("🔄 השווה שני שרטוטים", width="large")
+def _show_diff_dialog():
+    """העלאה של 2 קבצי JSON של ניתוחים → הצגת השינויים בין הגרסאות."""
+    import json as _json
+
+    from core.diff import diff_drawings, format_change_human
+
+    st.caption(
+        "💡 העלי שני קבצי JSON של ניתוחים שמורים מתוך `output/`. "
+        "המערכת תציג בדיוק מה השתנה בין הגרסאות — לפי קטגוריה."
+    )
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown("##### גרסה ישנה (A)")
+        file_a = st.file_uploader(
+            "JSON #1", type=["json"], key="diff_a",
+            label_visibility="collapsed",
+        )
+    with col_b:
+        st.markdown("##### גרסה חדשה (B)")
+        file_b = st.file_uploader(
+            "JSON #2", type=["json"], key="diff_b",
+            label_visibility="collapsed",
+        )
+
+    if not (file_a and file_b):
+        st.info(
+            "👆 העלי 2 קבצי JSON של ניתוחים. "
+            "טיפ: קבצי `output/<P/N>_<timestamp>.json` נוצרים אחרי כל ניתוח."
+        )
+        return
+
+    try:
+        a = _json.loads(file_a.read().decode("utf-8"))
+        b = _json.loads(file_b.read().decode("utf-8"))
+    except (UnicodeDecodeError, _json.JSONDecodeError) as exc:
+        st.error(f"❌ שגיאה בקריאת JSON: {exc}")
+        return
+
+    # If files contain "drawings" key (assembly mode JSON), pick first drawing
+    if isinstance(a, dict) and "drawings" in a and isinstance(a["drawings"], list):
+        a = a["drawings"][0] if a["drawings"] else {}
+    if isinstance(b, dict) and "drawings" in b and isinstance(b["drawings"], list):
+        b = b["drawings"][0] if b["drawings"] else {}
+
+    if not (isinstance(a, dict) and isinstance(b, dict)):
+        st.error("❌ הקבצים לא במבנה המצופה (dict של ניתוח שרטוט).")
+        return
+
+    diff = diff_drawings(a, b)
+    summary = diff["summary"]
+
+    if summary["total_changes"] == 0:
+        st.success(
+            f"✅ אין שינויים בין '{summary['a_label']}' ל-'{summary['b_label']}'. "
+            "הגרסאות זהות לחלוטין."
+        )
+        return
+
+    st.markdown(
+        f"### 🔄 {summary['a_label']}  →  {summary['b_label']}"
+    )
+    st.markdown(
+        f"**סה\"כ שינויים: {summary['total_changes']}** "
+        f"בקטגוריות: {', '.join(summary['categories_changed'])}"
+    )
+    st.divider()
+
+    cat_he = {
+        "identity": "🆔 זיהוי", "material": "🧱 חומר", "weights": "⚖️ משקלים",
+        "role": "🧭 תפקיד וכמות", "machining": "🔧 עיבוד שבבי",
+        "welding": "🔥 ריתוך", "heat_treatment": "🌡️ טיפול חום",
+        "coating": "🎨 ציפויים", "painting": "🖌️ צביעות",
+        "ndt": "🔬 NDT", "inspection": "🔍 בדיקות",
+        "final_approval": "✅ אישור סופי", "additional": "🛠️ תהליכים נוספים",
+        "standards": "📜 תקנים", "packaging": "📦 אריזה",
+        "notes": "📝 הערות", "bom": "📋 BOM",
+    }
+
+    for category, changes in diff["changes_by_category"].items():
+        with st.expander(
+            f"{cat_he.get(category, category)} ({len(changes)} שינויים)",
+            expanded=(category in ("identity", "material", "standards")),
+        ):
+            for ch in changes:
+                ctype = ch["type"]
+                color = {
+                    "added": "#198754",
+                    "removed": "#dc3545",
+                    "modified": "#fd7e14",
+                }.get(ctype, "#6c757d")
+                st.markdown(
+                    f'<div style="border-right:3px solid {color}; '
+                    f'padding:0.4em 0.8em; margin-bottom:0.3em; '
+                    f'background:#f8f9fa; border-radius:0.3em;">'
+                    f'{format_change_human(ch)}</div>',
+                    unsafe_allow_html=True,
+                )
+
+
+if st.session_state.get("_show_diff"):
+    st.session_state["_show_diff"] = False
+    _show_diff_dialog()
+
+
+# ═══════════════════════════════════════════════════════════════
 # סרגל צד תחתון משותף — מנהל + קבצים שמורים
 # ═══════════════════════════════════════════════════════════════
 def _render_sidebar_footer():
@@ -902,6 +1012,12 @@ def _render_sidebar_footer():
                      key="open_stats_btn",
                      help="היסטוריית ניתוחים + פילוח עלויות + ROI calculator"):
             st.session_state["_show_stats_dashboard"] = True
+            st.rerun()
+        if st.button("🔄 השווה שני שרטוטים", use_container_width=True,
+                     key="open_diff_btn",
+                     help="השוואה בין שני קבצי JSON של ניתוחים — מציג מה "
+                          "השתנה בין revision A ל-B"):
+            st.session_state["_show_diff"] = True
             st.rerun()
 
 
@@ -1044,14 +1160,25 @@ with st.container(border=True):
 
         if st.button("🔍 נתח שרטוט", type="primary",
                      use_container_width=True):
-            with st.spinner("🔄 מנתח... (עשוי לקחת 20-40 שניות)"):
+            with st.status("🔄 מנתח... (עשוי לקחת 20-40 שניות)",
+                           expanded=True) as status_box:
+                step_log: list[str] = []
+
+                def _on_step(i: int, name: str) -> None:
+                    step_log.append(f"[{i}/7] {name}")
+                    status_box.update(label=f"שלב {i}/7 · {name}")
+                    status_box.write(name)
+
                 try:
-                    result = extract_assembly_drawing(temp_path)
+                    result = extract_assembly_drawing(
+                        temp_path, progress_callback=_on_step,
+                    )
                     st.session_state.result = result
-                    st.success("✅ ניתוח הושלם")
-                    # log to history (best-effort, silent on failure)
+                    status_box.update(label="✅ ניתוח הושלם", state="complete")
+                    # log to history + audit (best-effort, silent on failure)
                     try:
                         cost = (result.get("_cost_info") or {}).get("total_cost_usd", 0)
+                        cache_hit = (cost == 0)
                         append_history(
                             filename=uploaded_file.name,
                             mode="single",
@@ -1059,7 +1186,14 @@ with st.container(border=True):
                             drawing_count=1,
                             warning_count=len(result.get("_validation_warnings") or []),
                             cost_usd=cost,
-                            cache_hit=(cost == 0),  # cache hit אם אין עלות
+                            cache_hit=cache_hit,
+                        )
+                        audit.log_extract(
+                            uploaded_file.name,
+                            model=get_deployment(),
+                            cost_usd=cost,
+                            cache_hit=cache_hit,
+                            mode="single",
                         )
                     except Exception:
                         logger.warning("history logging failed", exc_info=True)
@@ -1091,9 +1225,8 @@ if st.session_state.result:
     # ─── תקציר החלטה בראש המסך ───
     render_summary_card(r, demo=is_demo_result(r))
 
-    # ─── תצוגה מלאה (פירוט) ───
-    with st.expander("📋 פירוט מלא", expanded=True):
-        _render_drawing_card(r)
+    # ─── תצוגה מלאה בטאבים ───
+    render_drawing_tabs(r)
     _asm_render_validation_warnings(r)
     _asm_render_stage_model_feedback(
         cost_info,

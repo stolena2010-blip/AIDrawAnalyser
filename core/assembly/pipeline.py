@@ -73,7 +73,11 @@ logger = logging.getLogger(__name__)
 # ───────────────────────────────────────────────────────────────
 # 1. חילוץ שרטוט בודד במצב Assembly
 # ───────────────────────────────────────────────────────────────
-def extract_assembly_drawing(pdf_path: str | Path) -> dict:
+def extract_assembly_drawing(
+    pdf_path: str | Path,
+    *,
+    progress_callback=None,
+) -> dict:
     """חילוץ מלא של שרטוט (כולל עיבוד שבבי) — ללא התאמת מאסטרים.
 
     מחזיר dict עם:
@@ -83,7 +87,21 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
       inspection_processes, final_approval, additional_processes,
       packaging_notes, standards, notes,
       source_filename, _cost_info, _ocr_used.
+
+    ``progress_callback``: אופציונלי. callable(step_index, step_name) שייקרא
+    בכל שלב מרכזי. מאפשר ל-UI להציג progress חי במקום spinner גלובלי. דוגמה::
+
+        def on_step(i, name):
+            print(f"  [{i}/7] {name}")
+        extract_assembly_drawing(path, progress_callback=on_step)
     """
+    def _step(i: int, name: str) -> None:
+        if progress_callback is not None:
+            try:
+                progress_callback(i, name)
+            except Exception:
+                logger.debug("progress_callback failed", exc_info=True)
+
     pdf_path = Path(pdf_path)
     if not pdf_path.exists():
         raise PDFError(
@@ -93,20 +111,26 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
             context={"path": str(pdf_path)},
         )
 
-    # ─── בדיקת Cache ───
+    # ─── Step 1: Cache lookup ───
+    _step(1, "🔍 בודק cache (אולי השרטוט כבר נותח)")
     cached = get_cached_result(pdf_path, extra="assembly")
     if cached:
         logger.info(f"[Assembly] 🎯 Cache HIT: {pdf_path.name}")
+        _step(7, "🎯 Cache HIT — תוצאה ממטמון, ללא קריאה ל-Azure")
         return cached
 
     logger.info(f"[Assembly] מעבד שרטוט: {pdf_path.name}")
+
+    # ─── Step 2: PDF → images ───
+    _step(2, "🖼️ ממיר PDF לתמונות (DPI 300)")
     images = pdf_to_images(pdf_path, dpi=300)
 
     client = get_client()
     deployment = get_deployment()
     tracker = DrawingCostTracker(pdf_path.name)
 
-    # OCR מוקדם
+    # ─── Step 3: OCR (optional) ───
+    _step(3, "🔤 מריץ OCR מקדים (Tesseract)" if is_ocr_available() else "🔤 OCR לא זמין — דילוג")
     ocr_text = ""
     ocr_used = False
     if is_ocr_available():
@@ -116,7 +140,8 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
         except Exception as exc:
             logger.warning("[Assembly] OCR נכשל: %s", exc)
 
-    # Stage 1
+    # ─── Step 4: Vision Stage 1 (basic info) ───
+    _step(4, "🤖 Stage 1: Vision API — חילוץ פרטים בסיסיים (P/N, חומר, BOM)")
     s1_prompt = (
         build_enhanced_prompt(ASSEMBLY_STAGE_1_PROMPT, ocr_text)
         if ocr_text else ASSEMBLY_STAGE_1_PROMPT
@@ -124,13 +149,16 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
     stage1, usage1 = _call_vision(client, deployment, s1_prompt, images)
     tracker.add_stage("assembly_stage_1_basic", calculate_cost(usage1, deployment))
 
-    # Stage 2 — תכולה מלאה
+    # ─── Step 5: Vision Stage 2 (processes) ───
+    _step(5, "🤖 Stage 2: Vision API — חילוץ תהליכי ייצור (ציפויים, צביעה, בדיקות)")
     s2_prompt = (
         build_enhanced_prompt(ASSEMBLY_STAGE_2_PROMPT, ocr_text)
         if ocr_text else ASSEMBLY_STAGE_2_PROMPT
     )
     stage2, usage2 = _call_vision(client, deployment, s2_prompt, images)
     tracker.add_stage("assembly_stage_2_full", calculate_cost(usage2, deployment))
+
+    _step(6, "✨ Post-processing: ולידציות, נירמול, תיקוני OCR")
 
     # Reconcile ל-part_number: תיקון OCR confusion (B↔8) + השלמה מ-drawing/filename
     reconcile_part_number(stage1, pdf_path.name)
@@ -398,6 +426,7 @@ def extract_assembly_drawing(pdf_path: str | Path) -> dict:
     )
 
     save_cached_result(pdf_path, result, extra="assembly")
+    _step(7, "✅ הניתוח הושלם · נשמר ל-cache")
     return result
 
 

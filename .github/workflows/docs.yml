@@ -1,0 +1,61 @@
+name: Deploy docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install mkdocs + theme
+        run: pip install mkdocs mkdocs-material
+
+      - name: Sync top-level .md into docs/
+        run: |
+          cp README.md docs/index.md
+          cp DEPLOYMENT_GUIDE.md docs/deployment.md
+          cp PROJECT_OVERVIEW.md docs/overview.md
+          cp SALE_READINESS_RECOMMENDATIONS.md docs/sale-readiness.md
+          cp TECHNICAL_DUE_DILIGENCE.md docs/technical-due-diligence.md
+          cp SECURITY.md docs/security.md
+          cp DATA_HANDLING.md docs/data-handling.md
+          cp LICENSE_REVIEW.md docs/license-review.md
+          cp UX_IMPROVEMENT_RECOMMENDATIONS.md docs/ux-recommendations.md
+          cp CHANGELOG.md docs/changelog.md
+
+      - name: Build site
+        run: mkdocs build --strict --site-dir _site
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

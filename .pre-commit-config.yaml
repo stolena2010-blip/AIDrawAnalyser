@@ -1,0 +1,50 @@
+# Pre-commit hooks ל-AIDrawAnalyser.
+# התקנה ראשונית:
+#   pip install pre-commit
+#   pre-commit install
+#
+# הרצה ידנית על כל הקבצים:
+#   pre-commit run --all-files
+#
+# הוקס שרצים אוטומטית לפני כל git commit:
+#   • ruff check + format (לתיקון auto-fixable)
+#   • שגיאות whitespace, סיומות שורה, conflict markers
+#   • בדיקה שאין secrets פשוטים מודלפים
+#   • smoke tests (pn_utils + history) — מהיר מאוד
+
+repos:
+  # ─── Built-in hooks ───
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-json
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=2048"]  # 2MB מקסימום לקובץ tracked
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  # ─── Ruff (linter + formatter) ───
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^(core/|storage/|tests/|scripts/|app\.py|ui_assembly\.py)
+      - id: ruff-format
+        files: ^(core/|storage/|tests/|scripts/|app\.py|ui_assembly\.py)
+
+  # ─── Smoke tests מהירים (לא pytest מלא — רק כמה מודולים קריטיים) ───
+  - repo: local
+    hooks:
+      - id: smoke-tests
+        name: Smoke tests (pn_utils + history + customer_data)
+        entry: python -m pytest tests/test_pn_utils.py tests/test_history.py tests/test_customer_data.py -q --tb=line
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
